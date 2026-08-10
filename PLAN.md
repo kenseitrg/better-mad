@@ -10,7 +10,7 @@ Core rule: **UI-free core first, Panel app is a thin layer on top** (design §8)
 - **Exit:** `uv run better-mad` prints a banner; tests run green (trivial). ✔
 - Note: resolved on Python 3.11.15 with pandas 3.0.5 — watch pandas 3.x API changes in M1.
 
-## M1 — Data core (2–3 days)
+## M1 — Data core (2–3 days) ✅ done
 The part everything else depends on; fully headless and tested.
 - Loader: delimiter detection (whitespace/csv/tab), header parse, decimal separator,
   ragged-row/comment tolerance. Use `pd.read_csv(sep='\s+'|..., dtype=float32/64)`.
@@ -21,6 +21,8 @@ The part everything else depends on; fully headless and tested.
 - **Tests:** fixtures from trimmed copies of `data/14_01_*` (first ~1000 rows committed);
   sentinel handling; name sanitization of `TR.DOMFREQ` / `3DT_*`; cache invalidation.
 - **Exit:** loading the real 121 MB file takes a reported, sane time; reload via cache is fast.
+  Measured: 708k×9 first load ≈11 s (python engine, `\s+`), cache reload ≈0.05 s (220×);
+  31 MB RAM per file thanks to float32.
 
 ## M2 — Minimal web app + scatter/datashader (2–3 days)
 - Panel server: `better-mad file1 file2 ...` → serves UI on `--port`, opens browser.

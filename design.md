@@ -31,7 +31,8 @@ interactively with layered, configurable plots, and export figures.
 - No file extensions expected (`14_01_post_stack_attr_after_scac_all` style); the app
   must not rely on extensions.
 - Decimal separator configurable (`.` default, `,` optional).
-- Ragged/short rows and comment lines: skip with a warning, never crash the load.
+- Ragged rows: short rows are padded with NaN, over-long rows skipped; comment lines
+  (`#` by default) are ignored. Never crash the load.
 
 ### 2.2 Column names
 Real headers contain characters that are invalid in expressions and awkward in APIs
