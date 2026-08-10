@@ -91,6 +91,20 @@ class TestSentinels:
         assert np.isnan(df["a"].iloc[0])
         assert df["a"].iloc[1] == 5.0
 
+    def test_string_null_sentinel(self, tmp_path: Path) -> None:
+        # Some software emits the literal string NULL; the column must stay numeric.
+        p = tmp_path / "n.txt"
+        p.write_text("a b\n1.0 NULL\nNULL 2.0\n3.0 4.0\n")
+        df = parse_file(p)
+        assert np.isnan(df["b"].iloc[0])
+        assert np.isnan(df["a"].iloc[1])
+        assert df["a"].iloc[2] == 3.0
+        assert df["a"].dtype == np.float32
+
+    def test_default_sentinels_include_null_token(self) -> None:
+        assert "NULL" in DEFAULT_SENTINELS
+        assert -9999.0 in DEFAULT_SENTINELS
+
 
 class TestFormats:
     def test_csv(self, tmp_path: Path) -> None:

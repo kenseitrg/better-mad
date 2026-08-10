@@ -18,7 +18,15 @@ from better_mad.core.columns import sanitize_columns
 Delimiter = Literal["auto", "whitespace", "comma", "tab"]
 
 #: Industry-common null sentinels used as defaults (design.md §2.3). 0 is never a sentinel.
-DEFAULT_SENTINELS: tuple[float, ...] = (-999.25, -999.0, -9999.0, -99999.0, 1.0e30)
+#: Numeric sentinels plus string tokens (e.g. "NULL") some software emits.
+DEFAULT_SENTINELS: tuple[float | str, ...] = (
+    -999.25,
+    -999.0,
+    -9999.0,
+    -99999.0,
+    1.0e30,
+    "NULL",
+)
 
 #: Column names matching this pattern are kept as float64 (coordinates); everything else
 #: becomes float32 (design.md §2.4). Example matches: XCORD_MIDPT, YCORD_MIDPT.
@@ -37,7 +45,7 @@ class ParserSettings:
 
     delimiter: Delimiter = "auto"
     decimal: str = "."
-    sentinels: tuple[float, ...] = field(default_factory=lambda: DEFAULT_SENTINELS)
+    sentinels: tuple[float | str, ...] = field(default_factory=lambda: DEFAULT_SENTINELS)
     comment: str = "#"
     #: Sanitized column names to force to float64; None = auto-detect coordinate names.
     float64_columns: tuple[str, ...] | None = None
@@ -76,10 +84,13 @@ def _sep_for(delimiter: Delimiter, sample: str) -> tuple[str, Literal["c", "pyth
     return ",", "c"
 
 
-def _sentinel_strings(sentinels: tuple[float, ...]) -> list[str]:
+def _sentinel_strings(sentinels: tuple[float | str, ...]) -> list[str]:
     """String variants of sentinel values, since pandas matches na_values literally."""
     variants: set[str] = set()
     for s in sentinels:
+        if isinstance(s, str):
+            variants.add(s)
+            continue
         for v in (str(s), f"{s:g}", repr(s)):
             variants.add(v)
             variants.add(v.replace("e+", "e").replace("E+", "E"))

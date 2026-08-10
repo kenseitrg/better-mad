@@ -43,9 +43,10 @@ Real headers contain characters that are invalid in expressions and awkward in A
 - Mapping must be deterministic and collision-free (suffix on collision).
 
 ### 2.3 Null sentinels
-- Per-file list of sentinel values (e.g. `-999.25`, `-9999`, `-999.25`, `1e30`), applied
-  at load time → converted to NaN.
-- Defaults provided (common industry values), user-editable per file.
+- Per-file list of sentinel values (e.g. `-999.25`, `-9999`, `1e30`), applied at load
+  time → converted to NaN. Sentinels may be numeric or **string tokens (`NULL`)**.
+- Defaults provided (`-999.25, -999, -9999, -99999, 1e30, "NULL"` — matching common
+  processing-software conventions), user-editable per file.
 - `0.0` is never treated as null automatically.
 
 ### 2.4 Scale & performance
