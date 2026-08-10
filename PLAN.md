@@ -37,14 +37,18 @@ The part everything else depends on; fully headless and tested.
   datashader toggle works at 708k rows. ✔ (R1 spike retired, color scatter added,
   Add-plot crash fixed with pn.bind regression test)
 
-## M3 — Remaining v1 plot types (2–3 days)
+## M3 — Remaining v1 plot types (2–3 days) ✅ done
 - Histogram (bins, edges, log-y) + 1D KDE overlay, shared normalization.
 - 2D density layer (datashader aggregation: count default, mean optional).
-- Line graph (x-column picker, decimation in vector mode).
-- Polar scatter (θ/r column pickers — internal transform to keep azimuth work unblocked).
+- Line graph (x-column picker, stride decimation in vector mode >50k rows; LTTB deferred).
+- Polar scatter (θ/r/z column pickers) — internal transform to keep azimuth work unblocked.
   Convention: θ as-is (0–360°, no flipping by offset sign), r = |offset| (design §1#9).
+  Rendered under a polar graticule (matplotlib-polar look; Bokeh PolarTransform rejected
+  as it breaks the datashader path for zero user-visible gain — discussed, kept for v1).
 - Composition rules enforced in UI (design §4.2).
-- **Exit:** every v1 plot type demonstrable on the sample data.
+- Post-review fixes: grouped control rows (no horizontal scroll), auto-select new tab,
+  polar z-color, datashader mean-of-z bug (rasterize aggregates first vdim — AGENTS.md).
+- **Exit:** every v1 plot type demonstrable on the sample data. ✔ (manually verified)
 
 ## M4 — Layers, styling, color, comparison (2–3 days)
 - Layer manager: add/remove/reorder layers; file-qualified column refs; cross-file layers.
