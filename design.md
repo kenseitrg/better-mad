@@ -85,7 +85,7 @@ Real headers contain characters that are invalid in expressions and awkward in A
 |------|-------|
 | Scatter (XY) | map views and crossplots |
 | Color scatter | third column mapped to color |
-| Polar scatter | user picks θ column and r column. θ is used as-is (0–360° convention, §1#9); r = \|offset\| — offset sign never modifies azimuth. Enables future azimuth/offset work |
+| Polar scatter | user picks θ column, r column, and optional z (color). θ is used as-is (0–360° convention, §1#9); r = \|offset\| — offset sign never modifies azimuth. Rendered on a polar graticule (matplotlib-polar style; Bokeh has no native polar axes) |
 | Histogram | continuous column, configurable bin count/edges, linear or log y |
 | Density (1D) | KDE over a column, overlayable on histogram |
 | 2D density | datashader aggregation as image layer: count (default) or mean of a z column |

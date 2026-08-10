@@ -18,6 +18,7 @@ def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs]:
         index = len(tabs) + 1
         tab = PlotTab(state, index)
         tabs.append((f"Plot {index}", tab.layout()))
+        tabs.active = index - 1  # auto-select the new tab (M3 feedback)
 
     add_plot_button = pn.widgets.Button(label="+ Add plot", color="primary")
     add_plot_button.on_click(add_plot)

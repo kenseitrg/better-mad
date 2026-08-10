@@ -56,6 +56,44 @@ def failures_pane(state: AppState) -> pn.pane.Alert | None:
     return pn.pane.Alert(f"**Failed to load:**\n{text}", alert_type="danger")
 
 
+def _polar_graticule(r_max: float) -> hv.Overlay:
+    """Polar grid: radius circles, azimuth spokes, angle labels (matplotlib-polar look).
+
+    Bokeh has no polar projection, so this graticule is drawn over the transformed
+    points; 0 degrees is at the right (east), increasing counter-clockwise.
+    """
+    tick_angles = np.arange(0, 360, 45)
+    spoke_angles = np.arange(0, 360, 15)
+    t = np.linspace(0, 2 * np.pi, 181)
+    r_ticks = [r_max * f for f in (0.25, 0.5, 0.75, 1.0)]
+
+    circles = hv.Path([np.column_stack([rt * np.cos(t), rt * np.sin(t)]) for rt in r_ticks])
+    spokes = hv.Path(
+        [
+            np.array([[0.0, 0.0], [r_max * np.cos(np.deg2rad(a)), r_max * np.sin(np.deg2rad(a))]])
+            for a in spoke_angles
+        ]
+    )
+    labels = hv.Overlay(
+        [
+            hv.Text(
+                1.07 * r_max * np.cos(np.deg2rad(a)),
+                1.07 * r_max * np.sin(np.deg2rad(a)),
+                f"{a}\u00b0",
+            )
+            for a in tick_angles
+        ]
+    )
+    r_labels = hv.Overlay([hv.Text(rt, r_max * 0.03, f"{rt:g}") for rt in r_ticks[:-1]])
+    grid_style = {"color": "gray", "line_width": 0.6, "alpha": 0.6}
+    return (
+        spokes.opts(**grid_style)
+        * circles.opts(**grid_style)
+        * labels.opts(hv.opts.Text(color="gray", text_font_size="9pt"))
+        * r_labels.opts(hv.opts.Text(color="gray", text_font_size="8pt"))
+    )
+
+
 class PlotTab:
     """One plot tab: type selector, role slots, datashader toggle, view.
 
@@ -143,7 +181,7 @@ class PlotTab:
         self.z_sel.label = "Color (mean of)" if t == "density2d" else "Color (z)"
         self.x_sel.visible = t != "polar"
         self.y_sel.visible = t in ("scatter", "density2d", "line")
-        self.z_sel.visible = t in ("scatter", "density2d")
+        self.z_sel.visible = t in ("scatter", "density2d", "polar")
         self.theta_sel.visible = t == "polar"
         self.r_sel.visible = t == "polar"
         self.agg_sel.visible = t == "density2d"
@@ -180,7 +218,7 @@ class PlotTab:
             case "density1d":
                 return self._density1d(ds, x)
             case "polar":
-                return self._polar(ds, theta, r, use_datashader)
+                return self._polar(ds, theta, r, z, use_datashader)
         if not x or not y:
             return _NO_DATA
         match plot_type:
@@ -341,44 +379,68 @@ class PlotTab:
             title=title,
         )
 
-    def _polar(self, ds, theta: str | None, r: str | None, use_datashader: bool):
+    def _polar(self, ds, theta: str | None, r: str | None, z: str, use_datashader: bool):
         # Convention (design §1#9): azimuth used as-is (0-360 degrees), r = |column|.
+        # Bokeh has no native polar axes, so points are placed by transform and drawn
+        # under a polar graticule (matplotlib polar-chart look).
         if not theta or not r:
             return _NO_DATA
         t = ds.df[theta].to_numpy()
         radius = np.abs(ds.df[r].to_numpy())
         rad = np.deg2rad(t)
-        frame = pd.DataFrame(
-            {"x": radius * np.cos(rad), "y": radius * np.sin(rad), theta: t, r: radius}
-        ).dropna()
+        cols = {"x": radius * np.cos(rad), "y": radius * np.sin(rad), theta: t, r: radius}
+        if z:
+            cols[z] = ds.df[z].to_numpy()
+        frame = pd.DataFrame(cols).dropna()
         if frame.empty:
             return _NO_VALUES
-        points = hv.Points(frame, kdims=["x", "y"], vdims=[theta, r])
+        r_max = float(frame["x"].pow(2).add(frame["y"].pow(2)).pow(0.5).max()) or 1.0
+        points = hv.Points(frame, kdims=["x", "y"], vdims=[theta, r] + ([z] if z else []))
         theta_label = ds.display_names.get(theta, theta)
         r_label = ds.display_names.get(r, r)
+        title = f"{ds.name} (polar: θ={theta_label}, r=|{r_label}|)"
+        grid = _polar_graticule(r_max)
+        lim = r_max * 1.12
         if use_datashader:
-            return rasterize(points).opts(
+            if z:
+                layer = rasterize(points, column=z, aggregator="mean")
+                metric = f"mean {ds.display_names.get(z, z)}"
+            else:
+                layer = rasterize(points)
+                metric = "point density"
+            shaded = layer.opts(
                 width=_PLOT_WIDTH,
                 height=_PLOT_HEIGHT,
                 cmap="viridis",
                 colorbar=True,
                 aspect="equal",
-                xlabel="x",
-                ylabel="y",
-                title=f"{ds.name} (polar: θ={theta_label}, r=|{r_label}|)",
+                xlim=(-lim, lim),
+                ylim=(-lim, lim),
+                xaxis=None,
+                yaxis=None,
+                show_grid=False,
+                title=f"{title} [{metric}]",
             )
-        return points.opts(
-            width=_PLOT_WIDTH,
-            height=_PLOT_HEIGHT,
-            size=2,
-            alpha=0.6,
-            color="steelblue",
-            tools=["hover"],
-            aspect="equal",
-            xlabel="x",
-            ylabel="y",
-            title=f"{ds.name} (polar: θ={theta_label}, r=|{r_label}|)",
-        )
+            return shaded * grid
+        opts: dict[str, object] = {
+            "width": _PLOT_WIDTH,
+            "height": _PLOT_HEIGHT,
+            "size": 2,
+            "alpha": 0.6,
+            "tools": ["hover"],
+            "aspect": "equal",
+            "xlim": (-lim, lim),
+            "ylim": (-lim, lim),
+            "xaxis": None,
+            "yaxis": None,
+            "show_grid": False,
+            "title": title,
+        }
+        if z:
+            opts |= {"color": z, "cmap": "viridis", "colorbar": True}
+        else:
+            opts["color"] = "steelblue"
+        return points.opts(**opts) * grid
 
     def _render_banner(
         self, plot_type: str, file_name: str | None, use_datashader: bool
@@ -394,19 +456,25 @@ class PlotTab:
         )
 
     def layout(self) -> pn.Column:
-        controls = pn.Row(
-            self.type_sel,
-            self.file_sel,
-            self.x_sel,
-            self.y_sel,
-            self.z_sel,
-            self.theta_sel,
-            self.r_sel,
-            self.agg_sel,
-            self.bins_slider,
-            self.log_y,
-            self.kde_overlay,
-            self.ds_toggle,
-            sizing_mode="stretch_width",
+        # Grouped rows instead of one wide row: avoids horizontal scrolling as the
+        # control set grows (M3 feedback).
+        controls = pn.Column(
+            pn.Row(self.type_sel, self.file_sel, sizing_mode="stretch_width"),
+            pn.Row(
+                self.x_sel,
+                self.y_sel,
+                self.z_sel,
+                self.theta_sel,
+                self.r_sel,
+                self.agg_sel,
+                sizing_mode="stretch_width",
+            ),
+            pn.Row(
+                self.bins_slider,
+                self.log_y,
+                self.kde_overlay,
+                self.ds_toggle,
+                sizing_mode="stretch_width",
+            ),
         )
         return pn.Column(controls, self.banner, self.view, sizing_mode="stretch_width")

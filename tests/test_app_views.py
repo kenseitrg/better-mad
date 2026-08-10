@@ -195,8 +195,9 @@ class TestPlotTypes:
         tab.theta_sel.value = "az"
         tab.r_sel.value = "off"
         tab.ds_toggle.value = False
-        points = tab.view()
-        assert isinstance(points, hv.Points)
+        overlay = tab.view()
+        assert isinstance(overlay, hv.Overlay)  # points + graticule
+        points = next(el for el in overlay if isinstance(el, hv.Points))
         x = points.data["x"].to_numpy()
         y = points.data["y"].to_numpy()
         assert x[0] == np.cos(0) and abs(y[0]) < 1e-9
@@ -205,11 +206,33 @@ class TestPlotTypes:
         # original θ/r values kept for hover
         assert "az" in [d.name for d in points.vdims]
 
+    def test_polar_with_z_and_datashader(self) -> None:
+        df = pd.DataFrame(
+            {
+                "az": [0.0, 90.0, 180.0, 270.0],
+                "off": [1.0, 2.0, 3.0, 4.0],
+                "amp": [5.0, 6.0, 7.0, 8.0],
+            }
+        )
+        tab = PlotTab(_synthetic_state("polz", df), 1)
+        tab.type_sel.value = "polar"
+        tab.theta_sel.value = "az"
+        tab.r_sel.value = "off"
+        tab.z_sel.value = "amp"
+        tab.ds_toggle.value = False
+        overlay = tab.view()
+        points = next(el for el in overlay if isinstance(el, hv.Points))
+        assert "amp" in [d.name for d in points.vdims]
+        tab.ds_toggle.value = True
+        shaded = tab.view()
+        # DynamicMap absorbs the static graticule overlay when combined
+        assert isinstance(shaded, hv.DynamicMap)
+
     def test_visibility_by_type(self) -> None:
         tab = PlotTab(_state(WS), 1)
         tab.type_sel.value = "polar"
         assert not tab.x_sel.visible
-        assert tab.theta_sel.visible and tab.r_sel.visible
+        assert tab.theta_sel.visible and tab.r_sel.visible and tab.z_sel.visible
         tab.type_sel.value = "histogram"
         assert tab.bins_slider.visible and tab.kde_overlay.visible
         assert not tab.y_sel.visible
@@ -236,9 +259,11 @@ class TestAddPlotFlow:
         assert len(tabs) == 0
         button.clicks += 1  # fires the on_click callback
         assert len(tabs) == 1
+        assert tabs.active == 0  # new tab auto-selected
         assert isinstance(tabs.objects[0], pn.Column)
         button.clicks += 1
         assert len(tabs) == 2
+        assert tabs.active == 1
 
     def test_template_builds_with_and_without_data(self) -> None:
         from better_mad.app.server import build_template

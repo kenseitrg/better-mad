@@ -61,6 +61,9 @@ Entry paths: CLI args (`better-mad file1 file2 …`) and an in-UI "Add files" pi
    searchable column picker preceded by a **file selector** (so layers from another file
    start here).
 4. Plot renders as soon as the minimum roles are filled; every subsequent change is live.
+5. Controls are laid out in **grouped rows** (type/file · role slots · options) — never one
+   wide row — so horizontal scrolling never appears.
+6. Newly added plots are **auto-selected** (their tab becomes active).
 
 ## 5. Layers
 - Each plot tab contains a **layer list**: visibility checkbox, reorder, duplicate,
