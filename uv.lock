@@ -24,6 +24,8 @@ dependencies = [
     { name = "pandas" },
     { name = "panel" },
     { name = "pyarrow" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [package.dev-dependencies]
@@ -41,6 +43,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2" },
     { name = "panel", specifier = ">=1.5" },
     { name = "pyarrow", specifier = ">=16" },
+    { name = "scipy", specifier = ">=1.17.1" },
 ]
 
 [package.metadata.requires-dev]

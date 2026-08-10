@@ -24,16 +24,18 @@ The part everything else depends on; fully headless and tested.
   Measured: 708k×9 first load ≈11 s (python engine, `\s+`), cache reload ≈0.05 s (220×);
   31 MB RAM per file thanks to float32.
 
-## M2 — Minimal web app + scatter/datashader (2–3 days)
+## M2 — Minimal web app + scatter/datashader (2–3 days) ✅ done
 - Panel server: `better-mad file1 file2 ...` → serves UI on `--port`, opens browser.
 - UI skeleton: file sidebar (loaded datasets + column list w/ display names),
   main plot pane, per-plot controls.
-- Scatter plot element: x/y column pickers, datashader toggle per layer,
+- Scatter plot element: x/y/z column pickers, datashader toggle per layer,
   **warn-on-large-vector-render** (>~100k pts, overridable).
 - Hover annotations on vector layers (plotted x/y/z columns by default; user can add
-  extra columns to the tooltip — never dump all 20–30 columns).
+  extra columns to the tooltip — never dump all 20–30 columns). → tooltip column
+  picker lands with the M4 layer rework; plotted-cols default is in place.
 - **Exit:** both sample files loaded; scatter of `TR_DOMFREQ` vs `TR_RMSAMP` renders;
-  datashader toggle works at 708k rows.
+  datashader toggle works at 708k rows. ✔ (R1 spike retired, color scatter added,
+  Add-plot crash fixed with pn.bind regression test)
 
 ## M3 — Remaining v1 plot types (2–3 days)
 - Histogram (bins, edges, log-y) + 1D KDE overlay, shared normalization.
