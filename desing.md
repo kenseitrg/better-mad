@@ -16,4 +16,7 @@ Here is the design and some planned features for better seismic attribute plotti
 10. Plot interactivity should be actually useful - user should be able not only to pan and zoom, but also select data, view annotations on hover etc.
 11. Option to export selected points
 12. Tech stack - uv to manage Python environment with ruff and ty for code checking. Data handling with pandas dataframes
-13. Final deliverable - a standalone portable App Image  
+13. Final deliverable - a standalone portable App Image
+14. User should be able to configure all plot elements: legend, symbols, axis, labels, etc.
+15. User should be able to plot multiple datasets with the same visualization parameters and limits for precise comparison
+16. User should be able to export resulting plots in PNG format  
