@@ -52,6 +52,8 @@ live in `better_mad/core` and must be headless and pytest-covered. The Panel app
   **same commit**, including the decisions table at the top of each file.
 - Prefer small commits per milestone step; reference the milestone (e.g. "M1: loader …").
 - Errors degrade to banners/placeholders; modals only for destructive confirmations.
+- Panel gotcha: string-form `@pn.depends("widget.value")` requires a
+  `param.Parameterized` owner; on plain classes use explicit `pn.bind(fn, widget, ...)`.
 
 ## Commands (fill in as milestones land)
 ```bash

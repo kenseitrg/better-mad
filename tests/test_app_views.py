@@ -91,3 +91,30 @@ class TestPlotTab:
     def test_empty_state_view_is_placeholder(self) -> None:
         tab = PlotTab(AppState(), 1)
         assert isinstance(tab.view(), pn.pane.Markdown)
+
+    def test_layout_builds(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        layout = tab.layout()
+        assert isinstance(layout, pn.Column)
+
+
+class TestAddPlotFlow:
+    """Regression: clicking 'Add plot' crashed with
+    "'PlotTab' object has no attribute 'param'" (string-form pn.depends)."""
+
+    def test_click_adds_tab(self) -> None:
+        from better_mad.app.server import build_workspace
+
+        button, tabs = build_workspace(_state(WS, CSV))
+        assert len(tabs) == 0
+        button.clicks += 1  # fires the on_click callback
+        assert len(tabs) == 1
+        assert isinstance(tabs.objects[0], pn.Column)
+        button.clicks += 1
+        assert len(tabs) == 2
+
+    def test_template_builds_with_and_without_data(self) -> None:
+        from better_mad.app.server import build_template
+
+        assert build_template(_state(WS)) is not None
+        assert build_template(AppState()) is not None

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 import holoviews as hv
 import panel as pn
 from holoviews.operation.datashader import rasterize
@@ -52,6 +55,17 @@ class PlotTab:
         self.ds_toggle = pn.widgets.Checkbox(label="Datashader")
         self._sync_columns()
         self.file_sel.param.watch(self._on_file_change, "value")
+        # Explicit binds: PlotTab is a plain class (no .param), so string-form
+        # @pn.depends cannot resolve widget parameters here. Widgets supply the
+        # arguments, so both are effectively zero-arg callables.
+        self.view = cast(
+            Callable[[], hv.Element | pn.pane.Markdown],
+            pn.bind(self._render_view, self.file_sel, self.x_sel, self.y_sel, self.ds_toggle),
+        )
+        self.banner = cast(
+            Callable[[], pn.pane.Alert | None],
+            pn.bind(self._render_banner, self.file_sel, self.ds_toggle),
+        )
 
     def _on_file_change(self, _event: object) -> None:
         self._sync_columns()
@@ -70,16 +84,20 @@ class PlotTab:
         # Sensible default: datashader for large files (UX §8).
         self.ds_toggle.value = self.state.datasets[self.file_sel.value].n_rows > VECTOR_WARN_ROWS
 
-    @pn.depends("x_sel.value", "y_sel.value", "ds_toggle.value", "file_sel.value")
-    def view(self) -> hv.Element | pn.pane.Markdown:
-        if not self.file_sel.value or not self.x_sel.value or not self.y_sel.value:
+    def _render_view(
+        self,
+        file_name: str | None,
+        x: str | None,
+        y: str | None,
+        use_datashader: bool,
+    ) -> hv.Element | pn.pane.Markdown:
+        if not file_name or not x or not y:
             return pn.pane.Markdown("*Load a file and add a plot to get started.*")
-        ds = self.state.datasets[self.file_sel.value]
-        x, y = self.x_sel.value, self.y_sel.value
+        ds = self.state.datasets[file_name]
         xlabel = ds.display_names.get(x, x)
         ylabel = ds.display_names.get(y, y)
         points = hv.Points(ds.df, kdims=[x, y])
-        if self.ds_toggle.value:
+        if use_datashader:
             return rasterize(points).opts(
                 width=_PLOT_WIDTH,
                 height=_PLOT_HEIGHT,
@@ -101,11 +119,10 @@ class PlotTab:
             title=ds.name,
         )
 
-    @pn.depends("ds_toggle.value", "file_sel.value")
-    def banner(self) -> pn.pane.Alert | None:
-        if not self.file_sel.value or self.ds_toggle.value:
+    def _render_banner(self, file_name: str | None, use_datashader: bool) -> pn.pane.Alert | None:
+        if not file_name or use_datashader:
             return None
-        n = self.state.datasets[self.file_sel.value].n_rows
+        n = self.state.datasets[file_name].n_rows
         if n <= VECTOR_WARN_ROWS:
             return None
         return pn.pane.Alert(

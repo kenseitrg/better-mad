@@ -10,8 +10,8 @@ from better_mad.app.state import AppState
 from better_mad.app.views import PlotTab, dataset_pane, failures_pane
 
 
-def build_template(state: AppState) -> pn.template.FastListTemplate:
-    """Assemble the full UI for one session."""
+def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs]:
+    """The 'Add plot' button and the tabs it appends to; testable without a template."""
     tabs = pn.Tabs(sizing_mode="stretch_both")
 
     def add_plot(_event: object = None) -> None:
@@ -21,6 +21,12 @@ def build_template(state: AppState) -> pn.template.FastListTemplate:
 
     add_plot_button = pn.widgets.Button(label="+ Add plot", button_type="primary")
     add_plot_button.on_click(add_plot)
+    return add_plot_button, tabs
+
+
+def build_template(state: AppState) -> pn.template.FastListTemplate:
+    """Assemble the full UI for one session."""
+    add_plot_button, tabs = build_workspace(state)
 
     sidebar: list = [add_plot_button]
     if failures := failures_pane(state):
