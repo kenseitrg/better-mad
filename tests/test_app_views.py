@@ -1,6 +1,7 @@
 """Headless tests for app state and plot tab construction (M2/M3)."""
 
 from pathlib import Path
+from typing import cast
 
 import holoviews as hv
 import numpy as np
@@ -227,6 +228,30 @@ class TestPlotTypes:
         shaded = tab.view()
         # DynamicMap absorbs the static graticule overlay when combined
         assert isinstance(shaded, hv.DynamicMap)
+
+    def test_polar_datashader_aggregates_z_not_azimuth(self) -> None:
+        # Regression: rasterize ignores column= and aggregates the FIRST vdim;
+        # mean-of-z must not fall back to azimuth or point counts.
+        rng = np.random.default_rng(0)
+        n = 20_000
+        df = pd.DataFrame(
+            {
+                "az": rng.uniform(0, 360, n),
+                "off": rng.uniform(1, 10, n),
+                "amp": rng.uniform(0, 5, n),
+            }
+        )
+        tab = PlotTab(_synthetic_state("polagg", df), 1)
+        tab.type_sel.value = "polar"
+        tab.theta_sel.value = "az"
+        tab.r_sel.value = "off"
+        tab.z_sel.value = "amp"
+        tab.ds_toggle.value = True
+        view = cast(hv.DynamicMap, tab.view())
+        overlay = cast(hv.Overlay, view[()])
+        image = next(el for el in overlay if isinstance(el, hv.Image))
+        values = image.dimension_values(2)
+        assert np.nanmax(values) <= 5.0  # mean of amp, not azimuth (~360) or counts
 
     def test_visibility_by_type(self) -> None:
         tab = PlotTab(_state(WS), 1)

@@ -236,8 +236,10 @@ class PlotTab:
         points = hv.Points(ds.df, kdims=[x, y], vdims=[z] if z else [])
         if use_datashader:
             # Count density without z; mean of z when a color column is selected.
+            # Note: rasterize ignores `column=` for Points and aggregates the FIRST vdim;
+            # `points` here has vdims=[z], so the mean targets z.
             if z and zlabel:
-                layer = rasterize(points, column=z, aggregator="mean")
+                layer = rasterize(points, aggregator="mean")
                 metric = f"mean {zlabel}"
             else:
                 layer = rasterize(points)
@@ -330,7 +332,7 @@ class PlotTab:
         ylabel = ds.display_names.get(y, y)
         points = hv.Points(ds.df, kdims=[x, y], vdims=[z] if z else [])
         if aggregation == "mean" and z:
-            layer = rasterize(points, column=z, aggregator="mean")
+            layer = rasterize(points, aggregator="mean")  # vdims=[z]: first vdim is aggregated
             metric = f"mean {ds.display_names.get(z, z)}"
         else:
             layer = rasterize(points)
@@ -403,7 +405,10 @@ class PlotTab:
         lim = r_max * 1.12
         if use_datashader:
             if z:
-                layer = rasterize(points, column=z, aggregator="mean")
+                # rasterize aggregates the FIRST vdim, so shade dedicated points with
+                # vdims=[z] (the main `points` carries θ/r for hover in vector mode).
+                shade_points = hv.Points(frame, kdims=["x", "y"], vdims=[z])
+                layer = rasterize(shade_points, aggregator="mean")
                 metric = f"mean {ds.display_names.get(z, z)}"
             else:
                 layer = rasterize(points)
