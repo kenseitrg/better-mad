@@ -3,11 +3,12 @@
 Milestones ordered so that each ends with something runnable and demoable.
 Core rule: **UI-free core first, Panel app is a thin layer on top** (design §8).
 
-## M0 — Project scaffold (½ day)
+## M0 — Project scaffold (½ day) ✅ done
 - uv project, deps: pandas, pyarrow, holoviews, panel, datashader, numexpr; dev: ruff, ty, pytest.
 - Package layout: `better_mad/{core,app}/`, `tests/`, CLI entry point stub (`better-mad`).
-- ruff + ty config; CI-less local checks script.
-- **Exit:** `uv run better-mad` prints a banner; tests run green (trivial).
+- ruff + ty config; CI-less local checks script (`scripts/check.sh`).
+- **Exit:** `uv run better-mad` prints a banner; tests run green (trivial). ✔
+- Note: resolved on Python 3.11.15 with pandas 3.0.5 — watch pandas 3.x API changes in M1.
 
 ## M1 — Data core (2–3 days)
 The part everything else depends on; fully headless and tested.
