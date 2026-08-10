@@ -19,6 +19,7 @@ interactively with layered, configurable plots, and export figures.
 | 6 | Nulls | Configurable null sentinels per file. **0 is always a valid value** |
 | 7 | Cross-file expressions/joins | Deferred; needs its own design pass (join keys, alignment) |
 | 8 | Persistence | Save/load plot configurations and full sessions |
+| 9 | Polar convention | Azimuths arrive in 0–360° and are used **as-is** — never flipped by offset sign. Radius uses the **absolute value** of the offset column |
 
 ---
 
@@ -84,7 +85,7 @@ Real headers contain characters that are invalid in expressions and awkward in A
 |------|-------|
 | Scatter (XY) | map views and crossplots |
 | Color scatter | third column mapped to color |
-| Polar scatter | user picks θ column and r column (enables future azimuth/offset work) |
+| Polar scatter | user picks θ column and r column. θ is used as-is (0–360° convention, §1#9); r = \|offset\| — offset sign never modifies azimuth. Enables future azimuth/offset work |
 | Histogram | continuous column, configurable bin count/edges, linear or log y |
 | Density (1D) | KDE over a column, overlayable on histogram |
 | 2D density | datashader aggregation as image layer: count (default) or mean of a z column |

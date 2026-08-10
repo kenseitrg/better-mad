@@ -40,6 +40,7 @@ The part everything else depends on; fully headless and tested.
 - 2D density layer (datashader aggregation: count default, mean optional).
 - Line graph (x-column picker, decimation in vector mode).
 - Polar scatter (θ/r column pickers — internal transform to keep azimuth work unblocked).
+  Convention: θ as-is (0–360°, no flipping by offset sign), r = |offset| (design §1#9).
 - Composition rules enforced in UI (design §4.2).
 - **Exit:** every v1 plot type demonstrable on the sample data.
 
