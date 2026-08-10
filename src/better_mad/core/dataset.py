@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from better_mad.core.cache import cache_lookup, cache_store
-from better_mad.core.loading import ParserSettings, parse_file
+from better_mad.core.loading import LoaderError, ParserSettings, parse_file
 
 
 @dataclass
@@ -61,6 +61,8 @@ def load_dataset(
 ) -> Dataset:
     """Load an attribute file into a :class:`Dataset`, using the parquet cache if possible."""
     path = Path(path)
+    if not path.exists():
+        raise LoaderError(f"file not found: {path}")
     settings = settings or ParserSettings()
     t0 = time.perf_counter()
 

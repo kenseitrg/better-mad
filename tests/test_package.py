@@ -1,7 +1,7 @@
 """Smoke tests for the better-mad package (M0)."""
 
 from better_mad import __version__
-from better_mad.cli import build_parser, main
+from better_mad.cli import build_parser
 
 
 def test_version_string() -> None:
@@ -22,7 +22,16 @@ def test_parser_files_and_port() -> None:
     assert args.port == 8050
 
 
-def test_main_runs(capsys) -> None:  # type: ignore[no-untyped-def]
-    assert main([]) == 0
-    out = capsys.readouterr().out
-    assert "better-mad" in out
+def test_main_delegates_to_serve_app(monkeypatch) -> None:
+    """main() parses args and hands them to serve_app."""
+    import better_mad.app.server as server_mod
+    from better_mad import cli
+
+    calls: dict[str, object] = {}
+
+    def fake_serve(files: list[str], port: int, show: bool) -> None:
+        calls.update(files=files, port=port, show=show)
+
+    monkeypatch.setattr(server_mod, "serve_app", fake_serve)
+    assert cli.main(["a.txt", "--port", "8050", "--no-browser"]) == 0
+    assert calls == {"files": ["a.txt"], "port": 8050, "show": False}

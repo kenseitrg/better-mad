@@ -138,6 +138,13 @@ visualization parameters and axis/color limits. Supported via:
 - **Selection/lasso**: HoloViews linked selection where supported; feeds the (lower
   priority) point export (§7).
 
+### 5.1 Known interactivity limitations (observed in R1 spike)
+- Mouse-wheel zoom in datashader mode feels laggy under rapid zooming (each wheel event
+  triggers a re-aggregation); box-zoom feels instant. Acceptable for v1; throttling or
+  multi-level caching is future work.
+- Hover when fully zoomed out annotates several points under the cursor at once
+  (Bokeh hit-testing); accept for v1.
+
 ---
 
 ## 6. Configurations & sessions

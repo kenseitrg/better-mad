@@ -73,7 +73,10 @@ The part everything else depends on; fully headless and tested.
 - **Stretch:** AppImage via PyInstaller (validate numba/datashader freezing early in a spike!).
 
 ## Risks & spikes
-- **R1 Datashader+Panel selection/hover quirks** → spike in M2 before committing UX details.
+- **R1 Datashader+Panel selection/hover quirks** → ✅ spiked & verified with 708k rows:
+  rasterize + live toggle + hover all work; vector mode usable up to ~700k (slower).
+  Kept observations: wheel-zoom lag in datashader mode; multi-point hover when zoomed out
+  (both recorded in design §5.1, accepted for v1).
 - **R2 AppImage freezing of numba/datashader** → do a throwaway freeze spike before M7;
   drop to stretch if painful (design already allows CLI-only distribution).
 - **R3 Memory at 2M rows × several files** → float32 default + parquet cache mitigate;

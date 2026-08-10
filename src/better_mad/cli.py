@@ -26,10 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     print(BANNER)
-    if args.files:
-        print(f"files to load: {', '.join(args.files)}")
-    # M2: start the Panel server on localhost:{args.port} here.
-    print("web server not implemented yet (milestone M2)")
+    from better_mad.app.server import serve_app
+
+    serve_app(args.files, port=args.port, show=not args.no_browser)
     return 0
 
 

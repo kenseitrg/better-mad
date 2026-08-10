@@ -29,21 +29,32 @@ print(f"loaded {ds.n_rows} rows in {ds.load_time_s:.2f}s (cache={ds.from_cache})
 points = hv.Points(df, kdims=[X, Y], vdims=[Z, "TR_RMSAMP", "CMP"])
 
 vector_layer = points.opts(
-    width=850, height=650, size=2, color="steelblue", alpha=0.5,
-    tools=["hover"], xlabel=ds.display_names.get(X, X), ylabel=ds.display_names.get(Y, Y),
+    width=850,
+    height=650,
+    size=2,
+    color="steelblue",
+    alpha=0.5,
+    tools=["hover"],
+    xlabel=ds.display_names.get(X, X),
+    ylabel=ds.display_names.get(Y, Y),
     title="vector rendering",
 )
 
 raster_layer = rasterize(points, column=Z, aggregator="mean").opts(
-    width=850, height=650, cmap="viridis", colorbar=True, cnorm="eq_hist",
-    xlabel=ds.display_names.get(X, X), ylabel=ds.display_names.get(Y, Y),
+    width=850,
+    height=650,
+    cmap="viridis",
+    colorbar=True,
+    cnorm="eq_hist",
+    xlabel=ds.display_names.get(X, X),
+    ylabel=ds.display_names.get(Y, Y),
     title="datashader rendering (mean TR.DOMFREQ)",
 )
 
 toggle = pn.widgets.Checkbox(name="Datashader mode", value=True)
 
 
-@pn.depends(toggle)
+@pn.depends(toggle.param.value)
 def view(use_datashader: bool) -> hv.Element:
     return raster_layer if use_datashader else vector_layer
 
