@@ -19,7 +19,7 @@ def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs]:
         tab = PlotTab(state, index)
         tabs.append((f"Plot {index}", tab.layout()))
 
-    add_plot_button = pn.widgets.Button(label="+ Add plot", button_type="primary")
+    add_plot_button = pn.widgets.Button(label="+ Add plot", color="primary")
     add_plot_button.on_click(add_plot)
     return add_plot_button, tabs
 

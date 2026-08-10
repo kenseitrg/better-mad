@@ -1,13 +1,16 @@
-"""Headless tests for app state and plot tab construction (M2)."""
+"""Headless tests for app state and plot tab construction (M2/M3)."""
 
 from pathlib import Path
 
 import holoviews as hv
+import numpy as np
+import pandas as pd
 import panel as pn
 
 from better_mad.app.state import AppState
-from better_mad.app.views import VECTOR_WARN_ROWS, PlotTab
+from better_mad.app.views import LINE_DECIMATE_ROWS, VECTOR_WARN_ROWS, PlotTab
 from better_mad.core.dataset import Dataset
+from better_mad.core.loading import ParserSettings
 
 hv.extension("bokeh")
 
@@ -20,6 +23,19 @@ def _state(*paths: Path) -> AppState:
     state = AppState()
     state.load_files(list(paths))
     return state
+
+
+def _synthetic_state(name: str, df: pd.DataFrame) -> AppState:
+    df.attrs["display_names"] = {c: c for c in df.columns}
+    ds = Dataset(
+        name=name,
+        path=Path(f"/synthetic/{name}"),
+        df=df,
+        settings=ParserSettings(),
+        load_time_s=0.0,
+        from_cache=False,
+    )
+    return AppState(datasets={name: ds})
 
 
 class TestAppState:
@@ -113,6 +129,100 @@ class TestPlotTab:
         tab = PlotTab(_state(WS), 1)
         layout = tab.layout()
         assert isinstance(layout, pn.Column)
+
+
+class TestPlotTypes:
+    def test_histogram(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.type_sel.value = "histogram"
+        tab.x_sel.value = "TR_DOMFREQ"
+        tab.bins_slider.value = 40
+        hist = tab.view()
+        assert isinstance(hist, hv.Histogram)
+        assert len(hist.edges) - 1 == 40
+
+    def test_histogram_kde_overlay(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.type_sel.value = "histogram"
+        tab.x_sel.value = "TR_DOMFREQ"
+        tab.kde_overlay.value = True
+        assert isinstance(tab.view(), hv.Overlay)
+
+    def test_density1d(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.type_sel.value = "density1d"
+        tab.x_sel.value = "TR_RMSAMP"
+        assert isinstance(tab.view(), hv.Curve)
+
+    def test_density2d_count_and_mean(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.type_sel.value = "density2d"
+        tab.x_sel.value = "XCORD_MIDPT"
+        tab.y_sel.value = "YCORD_MIDPT"
+        assert isinstance(tab.view(), hv.DynamicMap)
+        tab.z_sel.value = "TR_DOMFREQ"
+        tab.agg_sel.value = "mean"
+        assert isinstance(tab.view(), hv.DynamicMap)
+
+    def test_line_vector(self) -> None:
+        tab = PlotTab(_state(FIXTURES / "sample_2d_lines.txt"), 1)
+        tab.type_sel.value = "line"
+        tab.x_sel.value = "CMP"
+        tab.y_sel.value = "TR_RMSAMP"
+        tab.ds_toggle.value = False
+        assert isinstance(tab.view(), hv.Curve)
+        tab.ds_toggle.value = True
+        assert isinstance(tab.view(), hv.DynamicMap)
+
+    def test_line_decimation(self) -> None:
+        n = LINE_DECIMATE_ROWS * 3
+        df = pd.DataFrame({"x": np.arange(n, dtype=float), "y": np.random.random(n)})
+        tab = PlotTab(_synthetic_state("big", df), 1)
+        tab.type_sel.value = "line"
+        tab.x_sel.value = "x"
+        tab.y_sel.value = "y"
+        tab.ds_toggle.value = False
+        curve = tab.view()
+        assert isinstance(curve, hv.Curve)
+        assert len(curve.data) <= LINE_DECIMATE_ROWS
+        assert "decimated" in curve.opts.get().kwargs["title"]
+
+    def test_polar_transform_uses_abs_radius(self) -> None:
+        # θ: 0°, 90°, 180°; r: 1, 2, -3 (abs → 3)
+        df = pd.DataFrame({"az": [0.0, 90.0, 180.0], "off": [1.0, 2.0, -3.0]})
+        tab = PlotTab(_synthetic_state("pol", df), 1)
+        tab.type_sel.value = "polar"
+        tab.theta_sel.value = "az"
+        tab.r_sel.value = "off"
+        tab.ds_toggle.value = False
+        points = tab.view()
+        assert isinstance(points, hv.Points)
+        x = points.data["x"].to_numpy()
+        y = points.data["y"].to_numpy()
+        assert x[0] == np.cos(0) and abs(y[0]) < 1e-9
+        assert abs(x[1]) < 1e-9 and y[1] == 2.0
+        assert x[2] == -3.0 and abs(y[2]) < 1e-9  # |-3| at 180°
+        # original θ/r values kept for hover
+        assert "az" in [d.name for d in points.vdims]
+
+    def test_visibility_by_type(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.type_sel.value = "polar"
+        assert not tab.x_sel.visible
+        assert tab.theta_sel.visible and tab.r_sel.visible
+        tab.type_sel.value = "histogram"
+        assert tab.bins_slider.visible and tab.kde_overlay.visible
+        assert not tab.y_sel.visible
+        tab.type_sel.value = "scatter"
+        assert tab.x_sel.visible and tab.y_sel.visible
+        assert not tab.theta_sel.visible
+
+    def test_nan_only_column_placeholder(self) -> None:
+        df = pd.DataFrame({"a": [np.nan, np.nan], "b": [1.0, 2.0]})
+        tab = PlotTab(_synthetic_state("nan", df), 1)
+        tab.type_sel.value = "histogram"
+        tab.x_sel.value = "a"
+        assert isinstance(tab.view(), pn.pane.Markdown)
 
 
 class TestAddPlotFlow:
