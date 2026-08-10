@@ -52,6 +52,7 @@ class TestPlotTab:
         assert tab.file_sel.value == "sample_ws"
         assert tab.x_sel.value == "CMP"  # first column
         assert tab.y_sel.value == "XCORD_MIDPT"  # second column
+        assert tab.z_sel.value == ""  # no color by default
         assert tab.ds_toggle.value is False  # 1000 rows < threshold
 
     def test_view_vector_and_datashader(self) -> None:
@@ -67,6 +68,22 @@ class TestPlotTab:
         tab.ds_toggle.value = True
         shaded = tab.view()
         assert isinstance(shaded, hv.DynamicMap)  # dynamic: re-aggregates on pan/zoom
+
+    def test_color_scatter(self) -> None:
+        state = _state(WS)
+        tab = PlotTab(state, 1)
+        tab.x_sel.value = "XCORD_MIDPT"
+        tab.y_sel.value = "YCORD_MIDPT"
+        tab.z_sel.value = "TR_DOMFREQ"
+
+        tab.ds_toggle.value = False
+        element = tab.view()
+        assert isinstance(element, hv.Points)
+        assert "TR_DOMFREQ" in [d.name for d in element.vdims]  # hover includes z
+
+        tab.ds_toggle.value = True
+        shaded = tab.view()
+        assert isinstance(shaded, hv.DynamicMap)  # mean aggregation over z
 
     def test_file_change_resyncs_columns(self) -> None:
         state = _state(WS, CSV)

@@ -143,7 +143,8 @@ visualization parameters and axis/color limits. Supported via:
   triggers a re-aggregation); box-zoom feels instant. Acceptable for v1; throttling or
   multi-level caching is future work.
 - Hover when fully zoomed out annotates several points under the cursor at once
-  (Bokeh hit-testing); accept for v1.
+  (Bokeh hit-testing); hover when deeply zoomed in is likewise unreliable. Accept
+  for v1.
 
 ---
 

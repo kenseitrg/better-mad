@@ -52,6 +52,7 @@ class PlotTab:
         )
         self.x_sel = pn.widgets.Select(label="X column")
         self.y_sel = pn.widgets.Select(label="Y column")
+        self.z_sel = pn.widgets.Select(label="Color (z)")
         self.ds_toggle = pn.widgets.Checkbox(label="Datashader")
         self._sync_columns()
         self.file_sel.param.watch(self._on_file_change, "value")
@@ -60,7 +61,14 @@ class PlotTab:
         # arguments, so both are effectively zero-arg callables.
         self.view = cast(
             Callable[[], hv.Element | pn.pane.Markdown],
-            pn.bind(self._render_view, self.file_sel, self.x_sel, self.y_sel, self.ds_toggle),
+            pn.bind(
+                self._render_view,
+                self.file_sel,
+                self.x_sel,
+                self.y_sel,
+                self.z_sel,
+                self.ds_toggle,
+            ),
         )
         self.banner = cast(
             Callable[[], pn.pane.Alert | None],
@@ -74,13 +82,16 @@ class PlotTab:
         if not self.file_sel.value:
             self.x_sel.options = {}
             self.y_sel.options = {}
+            self.z_sel.options = {}
             return
         options = self.state.column_options(self.file_sel.value)
         self.x_sel.options = dict(options)
         self.y_sel.options = dict(options)
+        self.z_sel.options = {"(none)": "", **options}
         cols = list(options.values())
         self.x_sel.value = cols[0] if cols else None
         self.y_sel.value = cols[1] if len(cols) > 1 else None
+        self.z_sel.value = ""
         # Sensible default: datashader for large files (UX §8).
         self.ds_toggle.value = self.state.datasets[self.file_sel.value].n_rows > VECTOR_WARN_ROWS
 
@@ -89,6 +100,7 @@ class PlotTab:
         file_name: str | None,
         x: str | None,
         y: str | None,
+        z: str,
         use_datashader: bool,
     ) -> hv.Element | pn.pane.Markdown:
         if not file_name or not x or not y:
@@ -96,28 +108,40 @@ class PlotTab:
         ds = self.state.datasets[file_name]
         xlabel = ds.display_names.get(x, x)
         ylabel = ds.display_names.get(y, y)
-        points = hv.Points(ds.df, kdims=[x, y])
+        zlabel = ds.display_names.get(z, z) if z else None
+        points = hv.Points(ds.df, kdims=[x, y], vdims=[z] if z else [])
         if use_datashader:
-            return rasterize(points).opts(
+            # Count density without z; mean of z when a color column is selected.
+            if z and zlabel:
+                layer = rasterize(points, column=z, aggregator="mean")
+                metric = f"mean {zlabel}"
+            else:
+                layer = rasterize(points)
+                metric = "point density"
+            return layer.opts(
                 width=_PLOT_WIDTH,
                 height=_PLOT_HEIGHT,
                 cmap="viridis",
                 colorbar=True,
                 xlabel=xlabel,
                 ylabel=ylabel,
-                title=f"{ds.name} (datashader: point density)",
+                title=f"{ds.name} (datashader: {metric})",
             )
-        return points.opts(
-            width=_PLOT_WIDTH,
-            height=_PLOT_HEIGHT,
-            size=2,
-            alpha=0.6,
-            color="steelblue",
-            tools=["hover"],
-            xlabel=xlabel,
-            ylabel=ylabel,
-            title=ds.name,
-        )
+        opts: dict[str, object] = {
+            "width": _PLOT_WIDTH,
+            "height": _PLOT_HEIGHT,
+            "size": 2,
+            "alpha": 0.6,
+            "tools": ["hover"],
+            "xlabel": xlabel,
+            "ylabel": ylabel,
+            "title": ds.name,
+        }
+        if z:
+            opts |= {"color": z, "cmap": "viridis", "colorbar": True}
+        else:
+            opts["color"] = "steelblue"
+        return points.opts(**opts)
 
     def _render_banner(self, file_name: str | None, use_datashader: bool) -> pn.pane.Alert | None:
         if not file_name or use_datashader:
@@ -135,6 +159,7 @@ class PlotTab:
             self.file_sel,
             self.x_sel,
             self.y_sel,
+            self.z_sel,
             self.ds_toggle,
             sizing_mode="stretch_width",
         )
