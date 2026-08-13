@@ -83,6 +83,10 @@ The part everything else depends on; fully headless and tested.
   content lives in one stable container mutated in place (sidebar objects replaced
   after doc-init never reach the live page). Stack re-visit resolved: **Panel stays**
   (design §1#10).
+- Datashader styling pass: **opacity applies to datashaded layers** (HoloViews maps
+  `alpha` to the Image glyph's `global_alpha`); symbol size/symbol, line width and
+  base color have no glyph to style once rasterized, so their controls hide when
+  Datashader is on (UX §5: disable invalid options).
 
 ## M5 — Filtering + expressions (2–3 days)
 - Filter panel per file: range sliders + value predicates on selected columns, AND-composed,

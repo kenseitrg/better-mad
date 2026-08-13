@@ -143,7 +143,7 @@ def _scatter(ds: Dataset, spec: LayerSpec, clim: tuple[float, float] | None, tit
         else:
             layer = rasterize(points)
             metric = "point density"
-        opts = base | _color_opts(s, clim)
+        opts = base | _color_opts(s, clim) | {"alpha": s.alpha}
         if title:
             opts["title"] = f"{title} (datashader: {metric})"
         return layer.opts(**opts)
@@ -241,6 +241,7 @@ def _density2d(ds: Dataset, spec: LayerSpec, clim: tuple[float, float] | None, t
         "height": PLOT_HEIGHT,
         "xlabel": xlabel,
         "ylabel": ylabel,
+        "alpha": s.alpha,
     } | _color_opts(s, clim)
     opts["title"] = f"{title} (datashader: {metric})" if title else metric
     return layer.opts(**opts)
@@ -268,6 +269,7 @@ def _line(ds: Dataset, spec: LayerSpec, title: str) -> hv.Element | pn.pane.Mark
             height=PLOT_HEIGHT,
             cmap=s.cmap,
             colorbar=True,
+            alpha=s.alpha,
             xlabel=xlabel,
             ylabel=ylabel,
             title=f"{title} (datashader)" if title else "",
@@ -376,7 +378,7 @@ def _polar_layer(
         else:
             layer = rasterize(points)
             metric = "point density"
-        opts = polar_opts | _color_opts(s, clim)
+        opts = polar_opts | _color_opts(s, clim) | {"alpha": s.alpha}
         opts["title"] = f"{layer_title} [{metric}]"
         return layer.opts(**opts), r_max
     opts = polar_opts | {

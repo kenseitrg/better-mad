@@ -181,7 +181,10 @@ class LayerRow:
     def _changed(self, event: object) -> None:
         if event is not None and getattr(event, "obj", None) is self.file_sel:  # type: ignore[union-attr]
             self._sync_columns(keep_selection=True)
-        elif event is not None and getattr(event, "obj", None) is self.type_sel:  # type: ignore[union-attr]
+        elif event is not None and getattr(event, "obj", None) in (
+            self.type_sel,
+            self.ds_toggle,
+        ):  # type: ignore[union-attr]
             self._sync_visibility()
         self.on_change(event)
 
@@ -239,12 +242,18 @@ class LayerRow:
         self.log_y_cb.visible = t == "histogram"
         self.kde_cb.visible = t == "histogram"
         self.ds_toggle.visible = t in ("scatter", "density2d", "line", "polar")
-        marker_styling = t in ("scatter", "polar")
-        self.size_slider.visible = marker_styling
-        self.symbol_sel.visible = marker_styling
-        self.linewidth_slider.visible = t == "line"
         if t == "density2d":
             self.ds_toggle.value = True
+        # Datashader aggregates points as infinitesimal samples into pixels: no
+        # glyph exists to size/shape, so those controls hide (UX §5: disable
+        # invalid options rather than error). Opacity still applies — it maps
+        # to the rendered image's global_alpha.
+        marker_styling = t in ("scatter", "polar") and not self.ds_toggle.value
+        self.size_slider.visible = marker_styling
+        self.symbol_sel.visible = marker_styling
+        self.linewidth_slider.visible = t == "line" and not self.ds_toggle.value
+        # Base color only matters without datashader (cmap-driven) or for histograms.
+        self.color_sel.visible = t == "histogram" or not self.ds_toggle.value
 
     def set_type_options(self, allowed: list[str]) -> None:
         """Restrict the type picker to composition-valid types (UX §5, design §4.2)."""

@@ -504,6 +504,56 @@ class TestColorSystem:
         assert kwargs["cnorm"] == "log"
 
 
+class TestDatashaderStyling:
+    """Which layer-style controls actually mean something under datashader."""
+
+    def test_alpha_applies_to_datashaded_layer(self) -> None:
+        # HoloViews maps alpha to the Image glyph's global_alpha — opacity is
+        # one style that survives rasterization (verified on bokeh 3.9/hv 1.23).
+        state = _state(WS)
+        tab = PlotTab(state, 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = True
+        row.alpha_slider.value = 0.3
+        fig = hv.render(tab.view(), backend="bokeh")
+        images = [
+            r.glyph
+            for r in fig.renderers
+            if type(r).__name__ == "GlyphRenderer" and type(r.glyph).__name__ == "Image"
+        ]
+        assert images
+        assert images[0].global_alpha == pytest.approx(0.3)
+
+    def test_marker_controls_hidden_under_datashader(self) -> None:
+        # Datashader aggregates points as infinitesimal samples — there is no
+        # glyph to size or shape, so the controls must hide (UX §5).
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        assert row.size_slider.visible and row.symbol_sel.visible  # vector
+        row.ds_toggle.value = True
+        assert not row.size_slider.visible
+        assert not row.symbol_sel.visible
+        assert not row.color_sel.visible  # cmap-driven when datashaded
+        row.ds_toggle.value = False
+        assert row.size_slider.visible and row.symbol_sel.visible
+
+    def test_line_width_hidden_for_datashaded_lines(self) -> None:
+        tab = PlotTab(_state(FIXTURES / "sample_2d_lines.txt"), 1)
+        row = tab.rows[0]
+        row.type_sel.value = "line"
+        assert row.linewidth_slider.visible  # vector line
+        row.ds_toggle.value = True
+        assert not row.linewidth_slider.visible
+
+    def test_histogram_color_stays_visible(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"
+        assert row.color_sel.visible
+
+
 class TestDuplicateSwap:
     """M4 comparison workflow: duplicate plot, swap file (design §4.5, UX §7)."""
 
