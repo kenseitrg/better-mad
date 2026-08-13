@@ -23,6 +23,11 @@ from better_mad.app.state import AppState
 from better_mad.core.composition import PLOT_TYPE_LABELS
 from better_mad.core.styles import COLORMAPS, SYMBOLS, LayerStyle
 
+#: Panel Select treats dicts as {display label: value}; PLOT_TYPE_LABELS is
+#: {internal key: label}, so invert for widgets. The type selector's *value*
+#: must always be an internal key — family() depends on it.
+_TYPE_OPTIONS = {label: key for key, label in PLOT_TYPE_LABELS.items()}
+
 #: Widget options presented as "(none)".
 _NONE = "(none)"
 
@@ -53,7 +58,7 @@ class LayerRow:
         )
         self.type_sel = pn.widgets.Select(
             label="Type",
-            options=PLOT_TYPE_LABELS,
+            options=_TYPE_OPTIONS,
             value=spec.plot_type,
         )
         self.x_sel = pn.widgets.Select(label="X column")

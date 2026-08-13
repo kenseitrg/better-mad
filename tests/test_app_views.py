@@ -366,6 +366,22 @@ class TestLayers:
         hist = next(el for el in view if isinstance(el, hv.Histogram))
         assert curves[0].dimension_values(1).max() <= hist.dimension_values(1).max() * 1.5
 
+    def test_type_select_values_are_internal_keys(self) -> None:
+        # Regression: Panel Select treats dict options as {display: value}; the
+        # inverted mapping leaked 'Scatter' labels into .value and crashed
+        # family() once the browser round-tripped the widget.
+        from better_mad.core.composition import PLOT_TYPE_LABELS
+
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        assert row.type_sel.options["Scatter"] == "scatter"
+        assert row.type_sel.value == "scatter"
+        row2 = tab.add_layer()
+        assert row2.type_sel.value in PLOT_TYPE_LABELS
+        row.type_sel.value = "line"
+        assert row.type_sel.value == "line"
+        assert tab.rows[0].type_sel.value in PLOT_TYPE_LABELS
+
     def test_type_options_restricted_to_family(self) -> None:
         tab = PlotTab(_state(WS), 1)
         row2 = tab.add_layer()
