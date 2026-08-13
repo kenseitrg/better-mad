@@ -585,30 +585,48 @@ class TestLayoutSplit:
         assert tab.layers_area in settings
         assert tab.controls.layout() in settings
         assert tab.plot_area not in settings
+        assert settings.sizing_mode == "stretch_width"
 
     def test_drawer_follows_active_tab(self) -> None:
-        from better_mad.app.server import build_drawer, build_workspace
+        from better_mad.app.server import build_template, build_workspace
 
-        button, tabs, plot_tabs = build_workspace(_state(WS, CSV))
-        drawer = build_drawer(tabs, plot_tabs)
-        assert "*Add a plot" in drawer.objects[0].object
+        state = _state(WS, CSV)
+        button, tabs, plot_tabs = build_workspace(state)
+        template = build_template(state, workspace=(button, tabs, plot_tabs))
+        drawer = template.right_sidebar
+        assert drawer is not None
+        first = drawer[0]
+        assert isinstance(first, pn.pane.Markdown)
+        assert "*Add a plot" in first.object
         button.clicks += 1
-        assert drawer.objects[0] is plot_tabs[0].settings_layout()
+        assert drawer[0] is plot_tabs[0].settings_layout()
         button.clicks += 1
-        assert drawer.objects[0] is plot_tabs[1].settings_layout()
+        assert drawer[0] is plot_tabs[1].settings_layout()
         tabs.active = 0
-        assert drawer.objects[0] is plot_tabs[0].settings_layout()
+        assert drawer[0] is plot_tabs[0].settings_layout()
 
-    def test_template_main_is_workspace_plus_drawer(self) -> None:
-        from better_mad.app.server import DRAWER_WIDTH, build_main, build_workspace
+    def test_template_uses_native_sidebars(self) -> None:
+        from better_mad.app.server import DRAWER_WIDTH, SIDEBAR_WIDTH, build_template
 
-        _button, tabs, _plot_tabs = build_workspace(_state(WS))
-        drawer = pn.Column(width=DRAWER_WIDTH)
-        main_row = build_main(tabs, drawer)
-        assert isinstance(main_row, pn.Row)
-        assert isinstance(main_row[0], pn.Tabs)
-        assert main_row[1] is drawer
-        assert drawer.width == DRAWER_WIDTH  # fixed-width drawer
+        template = build_template(_state(WS))
+        main = template.main
+        assert main is not None
+        assert isinstance(main[0], pn.Tabs)
+        assert template.sidebar_width == SIDEBAR_WIDTH
+        assert template.right_sidebar_width == DRAWER_WIDTH
+        # drag-resize shim wired in (footer script + handle CSS)
+        assert "bmad-resize" in template.right_sidebar_footer
+        assert any("bmad-resize-handle" in css for css in pn.config.raw_css)
+
+    def test_drawer_widgets_stretch_instead_of_overflow(self) -> None:
+        # Regression: Panel widgets default to width=300, which overflowed the
+        # drawer and caused a horizontal scrollbar.
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        for w in (row.x_sel, row.y_sel, row.file_sel, row.bins_slider, row.clim_min):
+            assert w.sizing_mode == "stretch_width"
+        for w in (tab.controls.x_min, tab.controls.clim_max, tab.controls.title_input):
+            assert w.sizing_mode == "stretch_width"
 
     def test_plot_figure_fits_container(self) -> None:
         # The bokeh figure must stretch to fill the freed center area.

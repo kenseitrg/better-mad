@@ -20,6 +20,7 @@ interactively with layered, configurable plots, and export figures.
 | 7 | Cross-file expressions/joins | Deferred; needs its own design pass (join keys, alignment) |
 | 8 | Persistence | Save/load plot configurations and full sessions |
 | 9 | Polar convention | Azimuths arrive in 0–360° and are used **as-is** — never flipped by offset sign. Radius uses the **absolute value** of the offset column |
+| 10 | Frontend stack re-visited (M4) | After UI-feedback ("Panel too limiting?"), **Panel stays**: the layout complaints traced to implementation bugs (Panel widgets' 300px default width; unused native right sidebar), all fixable. Switching would cost the HoloViews↔Datashader interactivity, and the UI-free core means the app layer can still be swapped later without touching core |
 
 ---
 

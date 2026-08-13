@@ -42,7 +42,8 @@ def dataset_pane(name: str, state: AppState) -> pn.pane.Markdown:
         f"**{name}**\n\n"
         f"{ds.n_rows:,} rows, {len(ds.columns)} cols, "
         f"loaded in {ds.load_time_s:.2f}s{' (cache)' if ds.from_cache else ''}\n\n"
-        f"{cols}"
+        f"{cols}",
+        sizing_mode="stretch_width",
     )
 
 
@@ -92,6 +93,7 @@ class PlotTab:
             label="Swap file",
             options={"(keep same)": "", **{n: n for n in names}},
             value="",
+            sizing_mode="stretch_width",
         )
         self.dup_btn = pn.widgets.Button(label="⧉ Duplicate", width=100)
         self.dup_btn.on_click(self._duplicate_clicked)
@@ -243,7 +245,9 @@ class PlotTab:
                 self.add_layer_btn, self.dup_file_sel, self.dup_btn, sizing_mode="stretch_width"
             )
             self._settings_col = pn.Column(
-                pn.pane.Markdown(f"**Plot {self.index}** — layers & options"),
+                pn.pane.Markdown(
+                    f"**Plot {self.index}** — layers & options", sizing_mode="stretch_width"
+                ),
                 toolbar,
                 self.controls.layout(),
                 self.layers_area,

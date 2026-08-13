@@ -33,6 +33,8 @@ interaction model (how).
 - **Center — plot workspace**: tabbed; each tab holds one plot plus a compact inline
   toolbar (datashader toggle, PNG button, lock-limits).
 - **Right — style drawer**: context panel for the current selection (plot or layer).
+- Both sidebars are **drag-resizable** on their inner edge and collapsible via the
+  header buttons; widths persist per browser (localStorage).
 - Plots render live; there is no "apply"/"redraw" button anywhere in the core flows.
 
 ## 2. Loading files

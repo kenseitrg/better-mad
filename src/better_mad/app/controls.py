@@ -96,6 +96,35 @@ class LayerRow:
         self.clim_max = pn.widgets.FloatInput(label="Color max (explicit)", value=s.clim_max)
         self.log_color_cb = pn.widgets.Checkbox(label="Log color scale", value=s.log_color)
 
+        # Panel widgets default to width=300 with sizing_mode=None: two of them in a
+        # narrow drawer overflow and cause a horizontal scrollbar. Stretch everything
+        # so rows share the available width (the color swatch stays compact).
+        for w in (
+            self.file_sel,
+            self.type_sel,
+            self.x_sel,
+            self.y_sel,
+            self.z_sel,
+            self.theta_sel,
+            self.r_sel,
+            self.agg_sel,
+            self.bins_slider,
+            self.log_y_cb,
+            self.kde_cb,
+            self.ds_toggle,
+            self.cmap_sel,
+            self.alpha_slider,
+            self.size_slider,
+            self.symbol_sel,
+            self.linewidth_slider,
+            self.clip_lo,
+            self.clip_hi,
+            self.clim_min,
+            self.clim_max,
+            self.log_color_cb,
+        ):
+            w.sizing_mode = "stretch_width"
+
         # Seed picker values from the spec (duplicate/session restore); the
         # sync below keeps them when valid for the selected file.
         self.x_sel.value = spec.x
@@ -319,6 +348,27 @@ class PlotControls:
         self.lock_color_cb = pn.widgets.Checkbox(label="Lock color scale", value=spec.color_locked)
         self.clim_min = pn.widgets.FloatInput(label="Locked color min", value=spec.clim_min)
         self.clim_max = pn.widgets.FloatInput(label="Locked color max", value=spec.clim_max)
+
+        # Stretch so widgets share the drawer width instead of overflowing at
+        # their 300px defaults (Panel widget default width; see LayerRow).
+        for w in (
+            self.title_input,
+            self.x_label,
+            self.y_label,
+            self.x_min,
+            self.x_max,
+            self.y_min,
+            self.y_max,
+            self.log_x_cb,
+            self.log_y_cb,
+            self.legend_cb,
+            self.legend_pos,
+            self.equal_aspect_cb,
+            self.lock_color_cb,
+            self.clim_min,
+            self.clim_max,
+        ):
+            w.sizing_mode = "stretch_width"
 
         _watch(
             [

@@ -68,6 +68,10 @@ is eager-on-change and must never crash the UI — errors degrade to banners.
   `plot.state` (see `fit_container_hook` in `app/layers.py`).
 - Panel gotcha: `pn.Tabs.active` starts at 0, so appending the first tab fires **no**
   `active` event — drawer-style watchers must also watch `objects`.
+- Panel gotcha: most widgets default to `width=300, sizing_mode=None`; two of them in a
+  narrow container overflow and cause a horizontal scrollbar. Set
+  `sizing_mode="stretch_width"` on widgets placed in sidebars/drawers. Also
+  `pn.config.raw_css` is a **list** of CSS strings — append, never `+=` a string.
 
 ## Commands (fill in as milestones land)
 ```bash
