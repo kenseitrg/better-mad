@@ -69,6 +69,11 @@ The part everything else depends on; fully headless and tested.
 - "⧉ Duplicate" + swap-file selector → comparison plot with identical parameters.
 - **Exit:** the two sample files compared with identical parameters and locked color
   scale ✔ (headless smoke test: duplicate b4/after, columns kept, clim identical on both).
+- Post-review UI refinement (1920×1080 target): layer blocks + plot options moved into
+  a right-hand style drawer that follows the active tab; center workspace is plot-only;
+  figures resize responsively via a bokeh sizing-policy hook (`fit/fit`), since
+  HoloViews exposes no sizing-policy opts. Layer blocks restacked for the narrow
+  drawer (≤2 widgets per row, style card collapsed).
 
 ## M5 — Filtering + expressions (2–3 days)
 - Filter panel per file: range sliders + value predicates on selected columns, AND-composed,

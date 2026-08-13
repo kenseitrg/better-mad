@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import panel as pn
 from holoviews.operation.datashader import rasterize
+from holoviews.plotting.bokeh.element import ElementPlot
 from scipy.stats import gaussian_kde
 
 from better_mad.core.composition import family as layer_family
@@ -494,6 +495,19 @@ def render_plot(
     return hv.Overlay(elements)
 
 
+def fit_container_hook(plot: ElementPlot, _element: object) -> None:
+    """Bokeh sizing-policy hook: make the figure fill its Panel container.
+
+    HoloViews does not expose width_policy/height_policy as opts, so they are
+    set on the bokeh figure at render time. width/height opts still serve as
+    initial hints; the plot then tracks the available space (1920x1080 target:
+    the plot gets everything the sidebar/drawer leave over).
+    """
+    fig = plot.state
+    fig.width_policy = "fit"
+    fig.height_policy = "fit"
+
+
 def apply_plot_opts(
     element: hv.Element | hv.Overlay | pn.pane.Markdown,
     spec: PlotSpec,
@@ -521,8 +535,7 @@ def apply_plot_opts(
         opts["show_legend"] = False
     elif spec.legend_position != "right":
         opts["legend_position"] = spec.legend_position
-    if not opts:
-        return element
+    opts["hooks"] = [fit_container_hook]
     return element.opts(**opts)
 
 

@@ -11,6 +11,7 @@ interaction model (how).
 | 2 | File import | **Auto-load with best-guess defaults + per-file settings panel**. No blocking preview dialog. Revisit if misdetection proves common |
 | 3 | File I/O direction | **Browser-native**: sessions and PNGs leave/enter via browser download/upload, not server-side paths |
 | 4 | Expression naming | **Prompt for a name at commit, pre-filled** with a default (`expr_1`, `expr_2`, …) so throwaway calculations need only Enter |
+| 5 | Screen real estate | Controls (plot options + all layer blocks) live in a fixed-width **right style drawer**; the center holds only the plot, which **resizes responsively** to fill the freed space. Target resolution 1920×1080 |
 
 ---
 
@@ -80,6 +81,10 @@ The style drawer has two levels, switched by what the user clicked:
 - **Layer properties** (clicked layer row): symbol, size, opacity, colormap, percentile
   clip (default 2–98%), explicit color min/max, log color scale, datashader toggle,
   tooltip columns (§10).
+
+**v1 implementation (M4):** the drawer shows the active plot's collapsed *Plot options*
+card plus one compact block per layer (its own collapsed *Layer style* card) — no
+click-selection switching yet. That is deferred polish; the content is identical.
 
 ## 7. Comparison workflow
 Three mechanisms, increasing power:

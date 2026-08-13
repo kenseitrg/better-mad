@@ -1,4 +1,9 @@
-"""Application assembly and serving (M2/M4)."""
+"""Application assembly and serving (M2/M4).
+
+Layout (UX §1): data sidebar | plot workspace (tabs) | style drawer.
+The drawer holds the active plot's layer management and options so the
+center is almost entirely plot (1920x1080 target).
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,10 @@ import panel as pn
 from better_mad.app.layers import PlotSpec
 from better_mad.app.state import AppState
 from better_mad.app.views import PlotTab, dataset_pane, failures_pane
+
+#: Right style-drawer width; the plot workspace takes everything else (UX §1).
+DRAWER_WIDTH = 360
+SIDEBAR_WIDTH = 260
 
 
 def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs, list[PlotTab]]:
@@ -24,7 +33,7 @@ def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs, list[P
 
         tab = PlotTab(state, index, spec=spec, on_duplicate=_duplicate)
         plot_tabs.append(tab)
-        tabs.append((f"Plot {index}", tab.layout()))
+        tabs.append((f"Plot {index}", tab.plot_layout()))
         tabs.active = index - 1  # auto-select the new tab (M3 feedback)
         return tab
 
@@ -36,9 +45,37 @@ def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs, list[P
     return add_plot_button, tabs, plot_tabs
 
 
+def build_drawer(tabs: pn.Tabs, plot_tabs: list[PlotTab]) -> pn.Column:
+    """Right style drawer: always shows the active plot's settings (UX §1/§6)."""
+    drawer = pn.Column(
+        width=DRAWER_WIDTH,
+        sizing_mode="stretch_height",
+        styles={"overflow-y": "auto"},
+    )
+
+    def sync(_event: object = None) -> None:
+        i = tabs.active
+        if plot_tabs and i is not None and 0 <= i < len(plot_tabs):
+            drawer[:] = [plot_tabs[i].settings_layout()]
+        else:
+            drawer[:] = [pn.pane.Markdown("*Add a plot to edit it.*")]
+
+    # Watch both: adding the first plot keeps `active` at 0 (no event), and
+    # switching tabs changes `active` without touching `objects`.
+    tabs.param.watch(sync, ["active", "objects"])
+    sync()
+    return drawer
+
+
+def build_main(tabs: pn.Tabs, drawer: pn.Column) -> pn.Row:
+    """Center workspace row: stretching tabs + fixed-width style drawer."""
+    return pn.Row(tabs, drawer, sizing_mode="stretch_both")
+
+
 def build_template(state: AppState) -> pn.template.FastListTemplate:
     """Assemble the full UI for one session."""
-    add_plot_button, tabs, _plot_tabs = build_workspace(state)
+    add_plot_button, tabs, plot_tabs = build_workspace(state)
+    drawer = build_drawer(tabs, plot_tabs)
 
     sidebar: list = [add_plot_button]
     if failures := failures_pane(state):
@@ -59,7 +96,8 @@ def build_template(state: AppState) -> pn.template.FastListTemplate:
     return pn.template.FastListTemplate(
         title="better-mad",
         sidebar=sidebar,
-        main=[tabs],
+        sidebar_width=SIDEBAR_WIDTH,
+        main=[build_main(tabs, drawer)],
         main_layout=None,
     )
 

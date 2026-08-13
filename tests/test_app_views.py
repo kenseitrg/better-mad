@@ -567,6 +567,61 @@ class TestDuplicateSwap:
         assert clim1 == clim2 == (0.0, 100.0)
 
 
+class TestLayoutSplit:
+    """M4 UI refinement: center workspace holds only the plot; all controls
+    move to a right style drawer that follows the active tab (UX §1)."""
+
+    def test_plot_layout_has_no_controls(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        plot_col = tab.plot_layout()
+        # only banner + plot containers; no widgets anywhere in the center pane
+        assert isinstance(plot_col, pn.Column)
+        widgets = [o for o in plot_col if isinstance(o, pn.widgets.Widget)]
+        assert widgets == []
+
+    def test_settings_layout_holds_controls(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        settings = tab.settings_layout()
+        assert tab.layers_area in settings
+        assert tab.controls.layout() in settings
+        assert tab.plot_area not in settings
+
+    def test_drawer_follows_active_tab(self) -> None:
+        from better_mad.app.server import build_drawer, build_workspace
+
+        button, tabs, plot_tabs = build_workspace(_state(WS, CSV))
+        drawer = build_drawer(tabs, plot_tabs)
+        assert "*Add a plot" in drawer.objects[0].object
+        button.clicks += 1
+        assert drawer.objects[0] is plot_tabs[0].settings_layout()
+        button.clicks += 1
+        assert drawer.objects[0] is plot_tabs[1].settings_layout()
+        tabs.active = 0
+        assert drawer.objects[0] is plot_tabs[0].settings_layout()
+
+    def test_template_main_is_workspace_plus_drawer(self) -> None:
+        from better_mad.app.server import DRAWER_WIDTH, build_main, build_workspace
+
+        _button, tabs, _plot_tabs = build_workspace(_state(WS))
+        drawer = pn.Column(width=DRAWER_WIDTH)
+        main_row = build_main(tabs, drawer)
+        assert isinstance(main_row, pn.Row)
+        assert isinstance(main_row[0], pn.Tabs)
+        assert main_row[1] is drawer
+        assert drawer.width == DRAWER_WIDTH  # fixed-width drawer
+
+    def test_plot_figure_fits_container(self) -> None:
+        # The bokeh figure must stretch to fill the freed center area.
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = False
+        fig = hv.render(tab.view(), backend="bokeh")
+        assert str(fig.width_policy) == "fit"
+        assert str(fig.height_policy) == "fit"
+
+
 class TestAddPlotFlow:
     """Regression: clicking 'Add plot' crashed with
     "'PlotTab' object has no attribute 'param'" (string-form pn.depends)."""

@@ -62,6 +62,12 @@ is eager-on-change and must never crash the UI — errors degrade to banners.
 - HoloViews gotcha: `rasterize(points, column=...)` **silently ignores `column`** for
   `hv.Points` (warning "Parameter(s) [column] not consumed") and aggregates the **first
   vdim**. To mean-aggregate z, shade a dedicated `hv.Points(..., vdims=[z])`.
+- HoloViews gotcha: bokeh sizing policies (`width_policy`/`height_policy`) are **not**
+  exposed as opts, and `responsive=True` yields unusable `None` dimensions. To make
+  plots fill their container, set the policies via an opts `hooks=[...]` callback on
+  `plot.state` (see `fit_container_hook` in `app/layers.py`).
+- Panel gotcha: `pn.Tabs.active` starts at 0, so appending the first tab fires **no**
+  `active` event — drawer-style watchers must also watch `objects`.
 
 ## Commands (fill in as milestones land)
 ```bash

@@ -263,42 +263,30 @@ class LayerRow:
     # --- layout ---------------------------------------------------------------
 
     def layout(self, actions: pn.Row) -> pn.Column:
-        """One bordered layer block: header actions, role slots, options, style card."""
+        """One layer block for the narrow right drawer (~360px): at most two
+        widgets per row, style card collapsed by default (UX §6)."""
         style_card = pn.Card(
-            pn.Row(self.color_sel, self.cmap_sel, self.alpha_slider, sizing_mode="stretch_width"),
-            pn.Row(
-                self.size_slider,
-                self.symbol_sel,
-                self.linewidth_slider,
-                sizing_mode="stretch_width",
-            ),
-            pn.Row(self.clip_lo, self.clip_hi, self.log_color_cb, sizing_mode="stretch_width"),
+            pn.Row(self.color_sel, self.cmap_sel, sizing_mode="stretch_width"),
+            pn.Row(self.alpha_slider, self.size_slider, sizing_mode="stretch_width"),
+            pn.Row(self.symbol_sel, self.linewidth_slider, sizing_mode="stretch_width"),
+            pn.Row(self.clip_lo, self.clip_hi, sizing_mode="stretch_width"),
             pn.Row(self.clim_min, self.clim_max, sizing_mode="stretch_width"),
+            pn.Row(self.log_color_cb, sizing_mode="stretch_width"),
             title="Layer style",
             collapsed=True,
             collapsible=True,
             sizing_mode="stretch_width",
         )
         return pn.Column(
+            pn.Row(self.visible_cb, actions, sizing_mode="stretch_width"),
+            pn.Row(self.file_sel, self.type_sel, sizing_mode="stretch_width"),
+            pn.Row(self.x_sel, self.y_sel, sizing_mode="stretch_width"),
+            # visibility toggles decide which of these pairs actually shows
             pn.Row(
-                self.visible_cb, self.file_sel, self.type_sel, actions, sizing_mode="stretch_width"
+                self.z_sel, self.agg_sel, self.theta_sel, self.r_sel, sizing_mode="stretch_width"
             ),
-            pn.Row(
-                self.x_sel,
-                self.y_sel,
-                self.z_sel,
-                self.theta_sel,
-                self.r_sel,
-                self.agg_sel,
-                sizing_mode="stretch_width",
-            ),
-            pn.Row(
-                self.bins_slider,
-                self.log_y_cb,
-                self.kde_cb,
-                self.ds_toggle,
-                sizing_mode="stretch_width",
-            ),
+            pn.Row(self.bins_slider, sizing_mode="stretch_width"),
+            pn.Row(self.log_y_cb, self.kde_cb, self.ds_toggle, sizing_mode="stretch_width"),
             style_card,
             sizing_mode="stretch_width",
         )
@@ -309,6 +297,7 @@ class PlotControls:
 
     def __init__(self, spec: PlotSpec, on_change: Callable[[object], None]):
         self.on_change = on_change
+        self._card: pn.Card | None = None
         self.title_input = pn.widgets.TextInput(label="Title", value=spec.title)
         self.x_label = pn.widgets.TextInput(label="X label", value=spec.x_label)
         self.y_label = pn.widgets.TextInput(label="Y label", value=spec.y_label)
@@ -379,21 +368,22 @@ class PlotControls:
         }
 
     def layout(self) -> pn.Card:
-        return pn.Card(
-            pn.Row(self.title_input, sizing_mode="stretch_width"),
-            pn.Row(self.x_label, self.y_label, sizing_mode="stretch_width"),
-            pn.Row(self.x_min, self.x_max, self.y_min, self.y_max, sizing_mode="stretch_width"),
-            pn.Row(
-                self.log_x_cb,
-                self.log_y_cb,
-                self.equal_aspect_cb,
-                self.legend_cb,
-                self.legend_pos,
+        """Collapsed-by-default card sized for the narrow right drawer."""
+        if self._card is None:
+            self._card = pn.Card(
+                pn.Row(self.title_input, sizing_mode="stretch_width"),
+                pn.Row(self.x_label, self.y_label, sizing_mode="stretch_width"),
+                pn.Row(self.x_min, self.x_max, sizing_mode="stretch_width"),
+                pn.Row(self.y_min, self.y_max, sizing_mode="stretch_width"),
+                pn.Row(
+                    self.log_x_cb, self.log_y_cb, self.equal_aspect_cb, sizing_mode="stretch_width"
+                ),
+                pn.Row(self.legend_cb, self.legend_pos, sizing_mode="stretch_width"),
+                pn.Row(self.lock_color_cb, sizing_mode="stretch_width"),
+                pn.Row(self.clim_min, self.clim_max, sizing_mode="stretch_width"),
+                title="Plot options",
+                collapsed=True,
+                collapsible=True,
                 sizing_mode="stretch_width",
-            ),
-            pn.Row(self.lock_color_cb, self.clim_min, self.clim_max, sizing_mode="stretch_width"),
-            title="Plot options",
-            collapsed=True,
-            collapsible=True,
-            sizing_mode="stretch_width",
-        )
+            )
+        return self._card
