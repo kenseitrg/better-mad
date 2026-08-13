@@ -38,16 +38,18 @@ RESIZER_CSS = """
 #: Injected via `right_sidebar_footer` (raw HTML, executes on load). Adds a
 #: drag handle to each sidebar's inner edge; the template layout is flexbox,
 #: so the center reflows live while dragging. Widths persist in localStorage.
+#: NOTE: the shim sets the template's width CSS *variables*, not inline
+#: min/max-width — inline styles would override the `.hidden` rules and break
+#: the header collapse buttons.
 RESIZER_JS = """<script>
 (function () {
-  function apply(el, w) { el.style.minWidth = w + "px"; el.style.maxWidth = w + "px"; }
-  function resizable(id, edge, min, max) {
+  function resizable(id, varName, edge, min, max) {
     var sb = document.getElementById(id);
     if (!sb || sb.dataset.bmadResize) return;
     sb.dataset.bmadResize = "1";
     sb.style.position = "relative";
     var saved = parseInt(localStorage.getItem("bmad-" + id + "-width"), 10);
-    if (saved >= min && saved <= max) apply(sb, saved);
+    if (saved >= min && saved <= max) sb.style.setProperty(varName, saved + "px");
     var handle = document.createElement("div");
     handle.className = "bmad-resize-handle";
     handle.style[edge] = "0";
@@ -58,7 +60,7 @@ RESIZER_JS = """<script>
       function move(ev) {
         var r = sb.getBoundingClientRect();
         var w = id === "right-sidebar" ? r.right - ev.clientX : ev.clientX - r.left;
-        apply(sb, Math.min(max, Math.max(min, Math.round(w))));
+        sb.style.setProperty(varName, Math.min(max, Math.max(min, Math.round(w))) + "px");
       }
       function up() {
         handle.removeEventListener("pointermove", move);
@@ -71,8 +73,8 @@ RESIZER_JS = """<script>
     });
   }
   function init() {
-    resizable("sidebar", "right", 220, 700);
-    resizable("right-sidebar", "left", 260, 800);
+    resizable("sidebar", "--sidebar-width", "right", 220, 700);
+    resizable("right-sidebar", "--right-sidebar-width", "left", 260, 800);
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
@@ -106,12 +108,16 @@ def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs, list[P
     return add_plot_button, tabs, plot_tabs
 
 
-def wire_drawer(
-    template: pn.template.FastListTemplate, tabs: pn.Tabs, plot_tabs: list[PlotTab]
-) -> None:
-    """Keep the template's right sidebar showing the active plot's settings."""
-    drawer = template.right_sidebar
-    assert drawer is not None  # always constructed with right_sidebar=[]
+def build_drawer(tabs: pn.Tabs, plot_tabs: list[PlotTab]) -> pn.Column:
+    """The style-drawer content column, synced to the active plot.
+
+    Gotcha (Panel internals): FastListTemplate registers each sidebar object as
+    a render item when the server document initializes — replacing sidebar
+    objects *after* serving never reaches the live page. So the template gets
+    exactly this one stable container at construction, and we mutate *its*
+    children, which sync normally.
+    """
+    drawer = pn.Column(sizing_mode="stretch_width")
 
     def sync(_event: object = None) -> None:
         i = tabs.active
@@ -124,6 +130,7 @@ def wire_drawer(
     # switching tabs changes `active` without touching `objects`.
     tabs.param.watch(sync, ["active", "objects"])
     sync()
+    return drawer
 
 
 def build_template(
@@ -136,6 +143,7 @@ def build_template(
     drive the buttons/tabs after assembly.
     """
     add_plot_button, tabs, plot_tabs = workspace or build_workspace(state)
+    drawer = build_drawer(tabs, plot_tabs)
 
     sidebar: list = [add_plot_button]
     if failures := failures_pane(state):
@@ -166,13 +174,12 @@ def build_template(
         title="better-mad",
         sidebar=sidebar,
         sidebar_width=SIDEBAR_WIDTH,
-        right_sidebar=[],
+        right_sidebar=[drawer],
         right_sidebar_width=DRAWER_WIDTH,
         right_sidebar_footer=RESIZER_JS,
         main=[tabs],
         main_layout=None,
     )
-    wire_drawer(template, tabs, plot_tabs)
     return template
 
 

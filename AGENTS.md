@@ -72,6 +72,13 @@ is eager-on-change and must never crash the UI — errors degrade to banners.
   narrow container overflow and cause a horizontal scrollbar. Set
   `sizing_mode="stretch_width"` on widgets placed in sidebars/drawers. Also
   `pn.config.raw_css` is a **list** of CSS strings — append, never `+=` a string.
+- Panel gotcha: `FastListTemplate` registers each sidebar object as a render item when
+  the server document initializes — **replacing sidebar objects after serving never
+  reaches the live page**. Put one stable container into the sidebar at construction
+  and mutate *its* children instead (see `build_drawer` in `app/server.py`).
+- CSS gotcha: JS layout shims must set the template's width **CSS variables**
+  (`--sidebar-width` / `--right-sidebar-width`), never inline `min/max-width` — inline
+  styles override the `.hidden` rules and break the header collapse buttons.
 
 ## Commands (fill in as milestones land)
 ```bash

@@ -588,13 +588,10 @@ class TestLayoutSplit:
         assert settings.sizing_mode == "stretch_width"
 
     def test_drawer_follows_active_tab(self) -> None:
-        from better_mad.app.server import build_template, build_workspace
+        from better_mad.app.server import build_drawer, build_workspace
 
-        state = _state(WS, CSV)
-        button, tabs, plot_tabs = build_workspace(state)
-        template = build_template(state, workspace=(button, tabs, plot_tabs))
-        drawer = template.right_sidebar
-        assert drawer is not None
+        button, tabs, plot_tabs = build_workspace(_state(WS, CSV))
+        drawer = build_drawer(tabs, plot_tabs)
         first = drawer[0]
         assert isinstance(first, pn.pane.Markdown)
         assert "*Add a plot" in first.object
@@ -614,9 +611,24 @@ class TestLayoutSplit:
         assert isinstance(main[0], pn.Tabs)
         assert template.sidebar_width == SIDEBAR_WIDTH
         assert template.right_sidebar_width == DRAWER_WIDTH
+        # exactly one stable container in the sidebar (Panel renders sidebar
+        # objects registered at doc init only — see build_drawer docstring)
+        rs = template.right_sidebar
+        assert rs is not None
+        assert len(rs) == 1 and isinstance(rs[0], pn.Column)
         # drag-resize shim wired in (footer script + handle CSS)
         assert "bmad-resize" in template.right_sidebar_footer
         assert any("bmad-resize-handle" in css for css in pn.config.raw_css)
+
+    def test_resizer_sets_css_variables_not_inline_widths(self) -> None:
+        # Regression: inline min/max-width overrode the template's `.hidden`
+        # rules and broke the header collapse buttons.
+        from better_mad.app.server import RESIZER_JS
+
+        assert "setProperty" in RESIZER_JS
+        assert "--sidebar-width" in RESIZER_JS
+        assert "--right-sidebar-width" in RESIZER_JS
+        assert "minWidth" not in RESIZER_JS and "maxWidth" not in RESIZER_JS
 
     def test_drawer_widgets_stretch_instead_of_overflow(self) -> None:
         # Regression: Panel widgets default to width=300, which overflowed the

@@ -76,10 +76,13 @@ The part everything else depends on; fully headless and tested.
   drawer (≤2 widgets per row, style card collapsed).
 - Post-review UI pass 2 (cropping/scrollbars/resize): drawer is now the template's
   **native right sidebar** (collapsible, follows active tab); both sidebars
-  **drag-resizable** (JS shim + localStorage); fixed Panel's 300px default widget
-  width overflow (all drawer widgets `sizing_mode="stretch_width"`), which caused the
-  drawer's horizontal scrollbar and the sidebar's cropped cards. Stack re-visit
-  resolved: **Panel stays** (design §1#10).
+  **drag-resizable** (JS shim sets width CSS variables — inline widths would break
+  the collapse buttons — and persists to localStorage); fixed Panel's 300px default
+  widget width overflow (all drawer widgets `sizing_mode="stretch_width"`), which
+  caused the drawer's horizontal scrollbar and the sidebar's cropped cards. Drawer
+  content lives in one stable container mutated in place (sidebar objects replaced
+  after doc-init never reach the live page). Stack re-visit resolved: **Panel stays**
+  (design §1#10).
 
 ## M5 — Filtering + expressions (2–3 days)
 - Filter panel per file: range sliders + value predicates on selected columns, AND-composed,
