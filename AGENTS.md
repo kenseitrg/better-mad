@@ -44,6 +44,11 @@ Two 121 MB files, ~708k rows × 9 columns. Know these before touching the loader
 live in `better_mad/core` and must be headless and pytest-covered. The Panel app in
 `better_mad/app` is a thin layer over the core. Don't let UI concerns leak into core.
 
+App module split (M4): `app/layers.py` = spec dataclasses + pure render functions
+(headless-testable); `app/controls.py` = widgets synced to specs; `app/views.py` =
+PlotTab orchestration + sidebar panes; `app/server.py` = assembly/serving. Rendering
+is eager-on-change and must never crash the UI — errors degrade to banners.
+
 ## Working conventions
 - Python ≥3.11 (system has 3.14), manage with `uv`; lint/format `ruff`, types `ty`.
 - float32 for attribute columns, float64 for coordinates; parquet cache in

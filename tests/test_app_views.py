@@ -1,4 +1,4 @@
-"""Headless tests for app state and plot tab construction (M2/M3)."""
+"""Headless tests for app state, plot tabs, layers, and M4 workflows."""
 
 from pathlib import Path
 from typing import cast
@@ -7,7 +7,9 @@ import holoviews as hv
 import numpy as np
 import pandas as pd
 import panel as pn
+import pytest
 
+from better_mad.app.controls import LayerRow
 from better_mad.app.state import AppState
 from better_mad.app.views import LINE_DECIMATE_ROWS, VECTOR_WARN_ROWS, PlotTab
 from better_mad.core.dataset import Dataset
@@ -64,62 +66,63 @@ class TestAppState:
 
 class TestPlotTab:
     def test_defaults(self) -> None:
-        state = _state(WS)
-        tab = PlotTab(state, 1)
-        assert tab.file_sel.value == "sample_ws"
-        assert tab.x_sel.value == "CMP"  # first column
-        assert tab.y_sel.value == "XCORD_MIDPT"  # second column
-        assert tab.z_sel.value == ""  # no color by default
-        assert tab.ds_toggle.value is False  # 1000 rows < threshold
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        assert row.file_sel.value == "sample_ws"
+        assert row.x_sel.value == "CMP"  # first column
+        assert row.y_sel.value == "XCORD_MIDPT"  # second column
+        assert row.z_sel.value == ""  # no color by default
+        assert row.ds_toggle.value is False  # 1000 rows < threshold
 
     def test_view_vector_and_datashader(self) -> None:
-        state = _state(WS)
-        tab = PlotTab(state, 1)
-        tab.x_sel.value = "TR_DOMFREQ"
-        tab.y_sel.value = "TR_RMSAMP"
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "TR_DOMFREQ"
+        row.y_sel.value = "TR_RMSAMP"
 
-        tab.ds_toggle.value = False
+        row.ds_toggle.value = False
         element = tab.view()
         assert isinstance(element, hv.Points)
 
-        tab.ds_toggle.value = True
+        row.ds_toggle.value = True
         shaded = tab.view()
         assert isinstance(shaded, hv.DynamicMap)  # dynamic: re-aggregates on pan/zoom
 
     def test_color_scatter(self) -> None:
-        state = _state(WS)
-        tab = PlotTab(state, 1)
-        tab.x_sel.value = "XCORD_MIDPT"
-        tab.y_sel.value = "YCORD_MIDPT"
-        tab.z_sel.value = "TR_DOMFREQ"
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.z_sel.value = "TR_DOMFREQ"
 
-        tab.ds_toggle.value = False
+        row.ds_toggle.value = False
         element = tab.view()
         assert isinstance(element, hv.Points)
         assert "TR_DOMFREQ" in [d.name for d in element.vdims]  # hover includes z
 
-        tab.ds_toggle.value = True
+        row.ds_toggle.value = True
         shaded = tab.view()
         assert isinstance(shaded, hv.DynamicMap)  # mean aggregation over z
 
-    def test_file_change_resyncs_columns(self) -> None:
-        state = _state(WS, CSV)
-        tab = PlotTab(state, 1)
-        tab.file_sel.value = "sample_csv_nulls"
-        assert "TR_HILBSTATIC" in tab.x_sel.options.values()
-        assert tab.x_sel.value == "CMP"
+    def test_file_change_keeps_common_columns(self) -> None:
+        tab = PlotTab(_state(WS, CSV), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.file_sel.value = "sample_csv_nulls"
+        assert "TR_HILBSTATIC" in row.x_sel.options.values()
+        # comparison workflow: same-schema columns survive a file swap (design §4.5)
+        assert row.x_sel.value == "XCORD_MIDPT"
 
     def test_warn_banner_only_for_large_vector(self, monkeypatch) -> None:
-        state = _state(WS)
-        tab = PlotTab(state, 1)
+        tab = PlotTab(_state(WS), 1)
         assert tab.banner() is None  # small file
 
         monkeypatch.setattr(Dataset, "n_rows", property(lambda self: VECTOR_WARN_ROWS + 1))
         tab2 = PlotTab(_state(WS), 1)
-        assert tab2.ds_toggle.value is True  # large file defaults to datashader
-        tab2.ds_toggle.value = False
+        assert tab2.rows[0].ds_toggle.value is True  # large file defaults to datashader
+        tab2.rows[0].ds_toggle.value = False
         assert isinstance(tab2.banner(), pn.pane.Alert)
-        tab2.ds_toggle.value = True
+        tab2.rows[0].ds_toggle.value = True
         assert tab2.banner() is None
 
     def test_empty_state_view_is_placeholder(self) -> None:
@@ -135,54 +138,60 @@ class TestPlotTab:
 class TestPlotTypes:
     def test_histogram(self) -> None:
         tab = PlotTab(_state(WS), 1)
-        tab.type_sel.value = "histogram"
-        tab.x_sel.value = "TR_DOMFREQ"
-        tab.bins_slider.value = 40
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"
+        row.x_sel.value = "TR_DOMFREQ"
+        row.bins_slider.value = 40
         hist = tab.view()
         assert isinstance(hist, hv.Histogram)
         assert len(hist.edges) - 1 == 40
 
     def test_histogram_kde_overlay(self) -> None:
         tab = PlotTab(_state(WS), 1)
-        tab.type_sel.value = "histogram"
-        tab.x_sel.value = "TR_DOMFREQ"
-        tab.kde_overlay.value = True
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"
+        row.x_sel.value = "TR_DOMFREQ"
+        row.kde_cb.value = True
         assert isinstance(tab.view(), hv.Overlay)
 
     def test_density1d(self) -> None:
         tab = PlotTab(_state(WS), 1)
-        tab.type_sel.value = "density1d"
-        tab.x_sel.value = "TR_RMSAMP"
+        row = tab.rows[0]
+        row.type_sel.value = "density1d"
+        row.x_sel.value = "TR_RMSAMP"
         assert isinstance(tab.view(), hv.Curve)
 
     def test_density2d_count_and_mean(self) -> None:
         tab = PlotTab(_state(WS), 1)
-        tab.type_sel.value = "density2d"
-        tab.x_sel.value = "XCORD_MIDPT"
-        tab.y_sel.value = "YCORD_MIDPT"
+        row = tab.rows[0]
+        row.type_sel.value = "density2d"
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
         assert isinstance(tab.view(), hv.DynamicMap)
-        tab.z_sel.value = "TR_DOMFREQ"
-        tab.agg_sel.value = "mean"
+        row.z_sel.value = "TR_DOMFREQ"
+        row.agg_sel.value = "mean"
         assert isinstance(tab.view(), hv.DynamicMap)
 
     def test_line_vector(self) -> None:
         tab = PlotTab(_state(FIXTURES / "sample_2d_lines.txt"), 1)
-        tab.type_sel.value = "line"
-        tab.x_sel.value = "CMP"
-        tab.y_sel.value = "TR_RMSAMP"
-        tab.ds_toggle.value = False
+        row = tab.rows[0]
+        row.type_sel.value = "line"
+        row.x_sel.value = "CMP"
+        row.y_sel.value = "TR_RMSAMP"
+        row.ds_toggle.value = False
         assert isinstance(tab.view(), hv.Curve)
-        tab.ds_toggle.value = True
+        row.ds_toggle.value = True
         assert isinstance(tab.view(), hv.DynamicMap)
 
     def test_line_decimation(self) -> None:
         n = LINE_DECIMATE_ROWS * 3
         df = pd.DataFrame({"x": np.arange(n, dtype=float), "y": np.random.random(n)})
         tab = PlotTab(_synthetic_state("big", df), 1)
-        tab.type_sel.value = "line"
-        tab.x_sel.value = "x"
-        tab.y_sel.value = "y"
-        tab.ds_toggle.value = False
+        row = tab.rows[0]
+        row.type_sel.value = "line"
+        row.x_sel.value = "x"
+        row.y_sel.value = "y"
+        row.ds_toggle.value = False
         curve = tab.view()
         assert isinstance(curve, hv.Curve)
         assert len(curve.data) <= LINE_DECIMATE_ROWS
@@ -192,10 +201,11 @@ class TestPlotTypes:
         # θ: 0°, 90°, 180°; r: 1, 2, -3 (abs → 3)
         df = pd.DataFrame({"az": [0.0, 90.0, 180.0], "off": [1.0, 2.0, -3.0]})
         tab = PlotTab(_synthetic_state("pol", df), 1)
-        tab.type_sel.value = "polar"
-        tab.theta_sel.value = "az"
-        tab.r_sel.value = "off"
-        tab.ds_toggle.value = False
+        row = tab.rows[0]
+        row.type_sel.value = "polar"
+        row.theta_sel.value = "az"
+        row.r_sel.value = "off"
+        row.ds_toggle.value = False
         overlay = tab.view()
         assert isinstance(overlay, hv.Overlay)  # points + graticule
         points = next(el for el in overlay if isinstance(el, hv.Points))
@@ -216,15 +226,16 @@ class TestPlotTypes:
             }
         )
         tab = PlotTab(_synthetic_state("polz", df), 1)
-        tab.type_sel.value = "polar"
-        tab.theta_sel.value = "az"
-        tab.r_sel.value = "off"
-        tab.z_sel.value = "amp"
-        tab.ds_toggle.value = False
+        row = tab.rows[0]
+        row.type_sel.value = "polar"
+        row.theta_sel.value = "az"
+        row.r_sel.value = "off"
+        row.z_sel.value = "amp"
+        row.ds_toggle.value = False
         overlay = tab.view()
         points = next(el for el in overlay if isinstance(el, hv.Points))
         assert "amp" in [d.name for d in points.vdims]
-        tab.ds_toggle.value = True
+        row.ds_toggle.value = True
         shaded = tab.view()
         # DynamicMap absorbs the static graticule overlay when combined
         assert isinstance(shaded, hv.DynamicMap)
@@ -242,11 +253,12 @@ class TestPlotTypes:
             }
         )
         tab = PlotTab(_synthetic_state("polagg", df), 1)
-        tab.type_sel.value = "polar"
-        tab.theta_sel.value = "az"
-        tab.r_sel.value = "off"
-        tab.z_sel.value = "amp"
-        tab.ds_toggle.value = True
+        row = tab.rows[0]
+        row.type_sel.value = "polar"
+        row.theta_sel.value = "az"
+        row.r_sel.value = "off"
+        row.z_sel.value = "amp"
+        row.ds_toggle.value = True
         view = cast(hv.DynamicMap, tab.view())
         overlay = cast(hv.Overlay, view[()])
         image = next(el for el in overlay if isinstance(el, hv.Image))
@@ -255,22 +267,288 @@ class TestPlotTypes:
 
     def test_visibility_by_type(self) -> None:
         tab = PlotTab(_state(WS), 1)
-        tab.type_sel.value = "polar"
-        assert not tab.x_sel.visible
-        assert tab.theta_sel.visible and tab.r_sel.visible and tab.z_sel.visible
-        tab.type_sel.value = "histogram"
-        assert tab.bins_slider.visible and tab.kde_overlay.visible
-        assert not tab.y_sel.visible
-        tab.type_sel.value = "scatter"
-        assert tab.x_sel.visible and tab.y_sel.visible
-        assert not tab.theta_sel.visible
+        row = tab.rows[0]
+        row.type_sel.value = "polar"
+        assert not row.x_sel.visible
+        assert row.theta_sel.visible and row.r_sel.visible and row.z_sel.visible
+        row.type_sel.value = "histogram"
+        assert row.bins_slider.visible and row.kde_cb.visible
+        assert not row.y_sel.visible
+        row.type_sel.value = "scatter"
+        assert row.x_sel.visible and row.y_sel.visible
+        assert not row.theta_sel.visible
 
     def test_nan_only_column_placeholder(self) -> None:
         df = pd.DataFrame({"a": [np.nan, np.nan], "b": [1.0, 2.0]})
         tab = PlotTab(_synthetic_state("nan", df), 1)
-        tab.type_sel.value = "histogram"
-        tab.x_sel.value = "a"
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"
+        row.x_sel.value = "a"
         assert isinstance(tab.view(), pn.pane.Markdown)
+
+
+class TestLayers:
+    """M4 layer manager: add/remove/reorder, cross-file layers, composition."""
+
+    def test_add_remove_move(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        assert len(tab.rows) == 1
+        row2 = tab.add_layer()
+        assert len(tab.rows) == 2
+        assert len(tab.layers_area) == 2
+
+        tab.move_layer(row2, -1)
+        assert tab.rows[0] is row2
+        tab.move_layer(row2, -1)  # already first: no-op
+        assert tab.rows[0] is row2
+
+        tab.remove_layer(row2)
+        assert len(tab.rows) == 1
+        tab.remove_layer(tab.rows[0])
+        assert len(tab.rows) == 1  # a plot keeps its last layer
+
+    def test_cross_file_layers_overlay(self) -> None:
+        tab = PlotTab(_state(WS, CSV), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = False
+        row2 = tab.add_layer()
+        row2.file_sel.value = "sample_csv_nulls"
+        row2.x_sel.value = "XCORD_MIDPT"
+        row2.y_sel.value = "YCORD_MIDPT"
+        row2.ds_toggle.value = False
+        view = tab.view()
+        assert isinstance(view, hv.Overlay)
+        points = [el for el in view if isinstance(el, hv.Points)]
+        assert len(points) == 2
+        assert len(points[0].data) == 1000
+        assert len(points[1].data) == 751
+
+    def test_layer_hidden_excluded_from_view(self) -> None:
+        tab = PlotTab(_state(WS, CSV), 1)
+        row2 = tab.add_layer()
+        row2.file_sel.value = "sample_csv_nulls"
+        row2.visible_cb.value = False
+        view = tab.view()
+        assert isinstance(view, hv.Points)  # single visible layer, no overlay
+
+    def test_scatter_line_density2d_compose(self) -> None:
+        tab = PlotTab(_state(FIXTURES / "sample_2d_lines.txt"), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "CMP"
+        row.y_sel.value = "TR_RMSAMP"
+        row.ds_toggle.value = False
+        line = tab.add_layer()
+        line.type_sel.value = "line"
+        line.x_sel.value = "CMP"
+        line.y_sel.value = "TR_DOMFREQ"
+        line.ds_toggle.value = False
+        view = tab.view()
+        assert isinstance(view, hv.Overlay)
+        assert sum(isinstance(el, hv.Points) for el in view) == 1
+        assert sum(isinstance(el, hv.Curve) for el in view) == 1
+
+    def test_histogram_and_density1d_compose(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"
+        row.x_sel.value = "TR_DOMFREQ"
+        density = tab.add_layer()
+        density.type_sel.value = "density1d"
+        density.x_sel.value = "TR_DOMFREQ"
+        view = tab.view()
+        assert isinstance(view, hv.Overlay)
+        assert any(isinstance(el, hv.Histogram) for el in view)
+        curves = [el for el in view if isinstance(el, hv.Curve)]
+        assert curves
+        # shared normalization: density scaled to histogram counts (design §4.2)
+        hist = next(el for el in view if isinstance(el, hv.Histogram))
+        assert curves[0].dimension_values(1).max() <= hist.dimension_values(1).max() * 1.5
+
+    def test_type_options_restricted_to_family(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        row2 = tab.add_layer()
+        # first layer is scatter → second restricted to the xy family (UX §5)
+        assert set(row2.type_sel.options.values()) == {"scatter", "line", "density2d"}
+        # single-layer plots keep all types
+        tab2 = PlotTab(_state(WS), 1)
+        assert len(tab2.rows[0].type_sel.options) == 6
+
+    def test_invalid_type_switch_snaps_back(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        tab.add_layer()
+        row = tab.rows[0]
+        row.type_sel.value = "histogram"  # invalid: other layer is scatter
+        assert row.type_sel.value == "scatter"  # snapped back to a valid type
+
+    def test_layer_style_opts(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = False
+        row.size_slider.value = 5.0
+        row.alpha_slider.value = 0.25
+        row.symbol_sel.value = "square"
+        kwargs = tab.view().opts.get().kwargs
+        assert kwargs["size"] == 5.0
+        assert kwargs["alpha"] == 0.25
+        assert kwargs["marker"] == "square"
+
+    def test_plot_level_opts(self) -> None:
+        tab = PlotTab(_state(WS), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = False
+        c = tab.controls
+        c.title_input.value = "my plot"
+        c.x_label.value = "easting"
+        c.y_label.value = "northing"
+        c.x_min.value = 0.0
+        c.x_max.value = 100.0
+        c.log_y_cb.value = True
+        c.equal_aspect_cb.value = True
+        c.legend_cb.value = False
+        kwargs = tab.view().opts.get().kwargs
+        assert kwargs["xlabel"] == "easting"
+        assert kwargs["ylabel"] == "northing"
+        assert kwargs["xlim"] == (0.0, 100.0)
+        assert kwargs["logy"] is True
+        assert kwargs["aspect"] == "equal"
+        assert kwargs["show_legend"] is False
+
+
+class TestColorSystem:
+    """M4 color handling: percentile clip, explicit limits, locked shared scale."""
+
+    def _z_tab(self) -> tuple[PlotTab, LayerRow, np.ndarray]:
+        n = 1000
+        z = np.arange(n, dtype=float)
+        df = pd.DataFrame({"x": z, "y": z[::-1].copy(), "z": z})
+        tab = PlotTab(_synthetic_state("c", df), 1)
+        row = tab.rows[0]
+        row.x_sel.value = "x"
+        row.y_sel.value = "y"
+        row.z_sel.value = "z"
+        row.ds_toggle.value = False
+        return tab, row, z
+
+    def test_default_percentile_clip_2_98(self) -> None:
+        tab, _row, z = self._z_tab()
+        lo, hi = tab.view().opts.get().kwargs["clim"]
+        assert lo == pytest.approx(np.percentile(z, 2))
+        assert hi == pytest.approx(np.percentile(z, 98))
+
+    def test_explicit_min_max_beats_clip(self) -> None:
+        tab, row, _ = self._z_tab()
+        row.clim_min.value = 10.0
+        row.clim_max.value = 90.0
+        assert tab.view().opts.get().kwargs["clim"] == (10.0, 90.0)
+
+    def test_full_range_when_clip_0_100(self) -> None:
+        tab, row, _ = self._z_tab()
+        row.clip_lo.value = 0.0
+        row.clip_hi.value = 100.0
+        assert "clim" not in tab.view().opts.get().kwargs
+
+    def test_locked_color_scale_shared_across_layers(self) -> None:
+        tab, _row, _ = self._z_tab()
+        row2 = tab.add_layer()
+        row2.x_sel.value = "x"
+        row2.y_sel.value = "y"
+        row2.z_sel.value = "z"
+        row2.ds_toggle.value = False
+        c = tab.controls
+        c.lock_color_cb.value = True
+        c.clim_min.value = 20.0
+        c.clim_max.value = 80.0
+        view = tab.view()
+        assert isinstance(view, hv.Overlay)
+        for points in (el for el in view if isinstance(el, hv.Points)):
+            assert points.opts.get().kwargs["clim"] == (20.0, 80.0)
+
+    def test_locked_scale_beats_per_layer_explicit(self) -> None:
+        tab, row, _ = self._z_tab()
+        row.clim_min.value = 1.0
+        row.clim_max.value = 2.0
+        c = tab.controls
+        c.lock_color_cb.value = True
+        c.clim_min.value = 20.0
+        c.clim_max.value = 80.0
+        assert tab.view().opts.get().kwargs["clim"] == (20.0, 80.0)
+
+    def test_cmap_and_log_color(self) -> None:
+        tab, row, _ = self._z_tab()
+        row.cmap_sel.value = "magma"
+        row.log_color_cb.value = True
+        kwargs = tab.view().opts.get().kwargs
+        assert kwargs["cmap"] == "magma"
+        assert kwargs["cnorm"] == "log"
+
+
+class TestDuplicateSwap:
+    """M4 comparison workflow: duplicate plot, swap file (design §4.5, UX §7)."""
+
+    def test_duplicate_captures_spec(self) -> None:
+        state = _state(WS, CSV)
+        created: list = []
+        tab = PlotTab(state, 1, on_duplicate=created.append)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        tab.dup_btn.clicks += 1
+        assert len(created) == 1
+        spec = created[0]
+        assert spec.layers[0].file == "sample_ws"  # "(keep same)"
+        assert spec.layers[0].x == "XCORD_MIDPT"
+
+    def test_duplicate_with_swap_file(self) -> None:
+        state = _state(WS, CSV)
+        created: list = []
+        tab = PlotTab(state, 1, on_duplicate=created.append)
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        tab.dup_file_sel.value = "sample_csv_nulls"
+        tab.dup_btn.clicks += 1
+        spec = created[0]
+        assert spec.layers[0].file == "sample_csv_nulls"
+        assert spec.layers[0].x == "XCORD_MIDPT"
+        assert spec.layers[0].y == "YCORD_MIDPT"
+
+    def test_workspace_duplicate_creates_comparable_tab(self) -> None:
+        from better_mad.app.server import build_workspace
+
+        state = _state(WS, CSV)
+        button, tabs, plot_tabs = build_workspace(state)
+        button.clicks += 1
+        tab = plot_tabs[0]
+        row = tab.rows[0]
+        row.x_sel.value = "XCORD_MIDPT"
+        row.y_sel.value = "YCORD_MIDPT"
+        row.ds_toggle.value = False
+        tab.dup_file_sel.value = "sample_csv_nulls"
+        tab.dup_btn.clicks += 1
+        assert len(tabs) == 2
+        tab2 = plot_tabs[1]
+        assert tabs.active == 1
+        row2 = tab2.rows[0]
+        assert row2.file_sel.value == "sample_csv_nulls"
+        # identical parameters preserved across the swap
+        assert row2.x_sel.value == "XCORD_MIDPT"
+        assert row2.y_sel.value == "YCORD_MIDPT"
+
+        # locked color scale → identical clim on both plots
+        for t in (tab, tab2):
+            t.rows[0].z_sel.value = "TR_DOMFREQ" if t is tab else "TR_HILBSTATIC"
+            t.controls.lock_color_cb.value = True
+            t.controls.clim_min.value = 0.0
+            t.controls.clim_max.value = 100.0
+        clim1 = tab.view().opts.get().kwargs["clim"]
+        clim2 = tab2.view().opts.get().kwargs["clim"]
+        assert clim1 == clim2 == (0.0, 100.0)
 
 
 class TestAddPlotFlow:
@@ -280,7 +558,7 @@ class TestAddPlotFlow:
     def test_click_adds_tab(self) -> None:
         from better_mad.app.server import build_workspace
 
-        button, tabs = build_workspace(_state(WS, CSV))
+        button, tabs, _plot_tabs = build_workspace(_state(WS, CSV))
         assert len(tabs) == 0
         button.clicks += 1  # fires the on_click callback
         assert len(tabs) == 1

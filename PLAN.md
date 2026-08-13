@@ -50,13 +50,25 @@ The part everything else depends on; fully headless and tested.
   polar z-color, datashader mean-of-z bug (rasterize aggregates first vdim — AGENTS.md).
 - **Exit:** every v1 plot type demonstrable on the sample data. ✔ (manually verified)
 
-## M4 — Layers, styling, color, comparison (2–3 days)
-- Layer manager: add/remove/reorder layers; file-qualified column refs; cross-file layers.
-- Style panel: legend, symbol, size, opacity, axis labels/limits, log axes, equal aspect for maps.
-- Color system: colormap picker, percentile clipping (default 2–98%), explicit min/max,
-  log color scale, **lock/shared color scale** across layers.
-- "Duplicate plot, swap file" action → b4/after comparison workflow.
-- **Exit:** the two sample files compared with identical parameters and locked color scale.
+## M4 — Layers, styling, color, comparison (2–3 days) ✅ done
+- App module split for maintainability: `app/layers.py` (LayerSpec/PlotSpec models +
+  pure render functions), `app/controls.py` (LayerRow + PlotControls widgets),
+  `app/views.py` (PlotTab orchestration). Rendering is now eager-on-change with
+  error-to-banner degradation; transient invalid states (e.g. x == y) get placeholders.
+- Layer manager: add/remove/reorder/hide layers; file-qualified column refs;
+  cross-file layers in one plot; column choices survive file swaps (same-schema).
+- Composition rules (design §4.2) enforced by restricting type pickers (xy family:
+  scatter/line/density2d; 1d family: histogram+density1d with shared normalization;
+  polar single-family). Invalid type switches snap back to a valid type.
+- Style panel: per-layer symbol/size/opacity/line-width/colormap in collapsible card;
+  plot options card: title, axis labels, axis limits, log axes, legend on/off+position,
+  equal aspect for maps.
+- Color system: per-layer colormap, percentile clip (default 2–98%, disable = 0–100),
+  explicit min/max, log color scale (cnorm), **locked shared color scale** across all
+  layers of a plot (locked scale beats per-layer overrides).
+- "⧉ Duplicate" + swap-file selector → comparison plot with identical parameters.
+- **Exit:** the two sample files compared with identical parameters and locked color
+  scale ✔ (headless smoke test: duplicate b4/after, columns kept, clim identical on both).
 
 ## M5 — Filtering + expressions (2–3 days)
 - Filter panel per file: range sliders + value predicates on selected columns, AND-composed,

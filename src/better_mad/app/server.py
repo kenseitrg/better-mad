@@ -1,4 +1,4 @@
-"""Application assembly and serving (M2)."""
+"""Application assembly and serving (M2/M4)."""
 
 from __future__ import annotations
 
@@ -6,28 +6,39 @@ from pathlib import Path
 
 import panel as pn
 
+from better_mad.app.layers import PlotSpec
 from better_mad.app.state import AppState
 from better_mad.app.views import PlotTab, dataset_pane, failures_pane
 
 
-def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs]:
-    """The 'Add plot' button and the tabs it appends to; testable without a template."""
+def build_workspace(state: AppState) -> tuple[pn.widgets.Button, pn.Tabs, list[PlotTab]]:
+    """The 'Add plot' button, the tabs it appends to, and the PlotTab registry."""
     tabs = pn.Tabs(sizing_mode="stretch_both")
+    plot_tabs: list[PlotTab] = []
 
-    def add_plot(_event: object = None) -> None:
+    def add_plot(spec: PlotSpec | None = None) -> PlotTab:
         index = len(tabs) + 1
-        tab = PlotTab(state, index)
+
+        def _duplicate(dup_spec: PlotSpec) -> None:
+            add_plot(spec=dup_spec)
+
+        tab = PlotTab(state, index, spec=spec, on_duplicate=_duplicate)
+        plot_tabs.append(tab)
         tabs.append((f"Plot {index}", tab.layout()))
         tabs.active = index - 1  # auto-select the new tab (M3 feedback)
+        return tab
+
+    def _on_add_click(_event: object) -> None:
+        add_plot()
 
     add_plot_button = pn.widgets.Button(label="+ Add plot", color="primary")
-    add_plot_button.on_click(add_plot)
-    return add_plot_button, tabs
+    add_plot_button.on_click(_on_add_click)
+    return add_plot_button, tabs, plot_tabs
 
 
 def build_template(state: AppState) -> pn.template.FastListTemplate:
     """Assemble the full UI for one session."""
-    add_plot_button, tabs = build_workspace(state)
+    add_plot_button, tabs, _plot_tabs = build_workspace(state)
 
     sidebar: list = [add_plot_button]
     if failures := failures_pane(state):
