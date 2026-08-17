@@ -63,6 +63,11 @@ The new engine; fully headless and pytest-covered.
   options per element (`_capture_options`, traverse-order aligned) and the runner
   re-applies them after unpickle. Verified live: viridis → fire switch updates the
   canvas in-session.
+- Known limitation (M2): **`aspect="equal"` is incompatible with the auto-sizing
+  preview** — bokeh's match_aspect computes the plot area from stale default 600×600
+  dimensions under fit sizing policies (measured: 494×355 canvas in a 1560×799
+  figure; sizing_mode="stretch_both" no better). Demo + skills omit it; proper
+  equal-aspect support is future work (needs client-side size reconciliation).
 - Diagnostics note: Panel 1.9 renders pane content inside **Shadow DOM** — page
   scripts must traverse `shadowRoot`s (plain `querySelector` finds nothing).
   R1 (Terminal widget) still open for M3.

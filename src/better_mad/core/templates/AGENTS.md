@@ -57,6 +57,10 @@ bm.show(img.opts(cmap="viridis"))
 
 ## Known pitfalls
 
+- **Do not use `aspect="equal"`**: it shrinks the plot to a small letterboxed area
+  under the preview's auto-sizing (bokeh's match_aspect computes from stale default
+  dimensions). If map proportions matter, mention it in a comment — proper
+  equal-aspect support is tracked as future work.
 - `import better_mad.sdk` already loads the HoloViews bokeh backend — `.opts()`
   works as-is; do not call `hv.extension()` or `hv.notebook_extension()` yourself.
 - `rasterize(points, column=...)` **silently ignores `column`** for `hv.Points` and
