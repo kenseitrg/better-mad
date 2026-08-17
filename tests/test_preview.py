@@ -198,6 +198,47 @@ def test_worker_exception_does_not_stuck_running(tmp_path: Path, monkeypatch) ->
     assert not app._pending_run
 
 
+def test_render_failure_keeps_last_good_and_recovers(tmp_path: Path) -> None:
+    """Invalid opts raise at render time (app process, not subprocess): degrade
+    to a banner, keep the last good plot, and recover on the next good run."""
+    import numpy as np
+
+    app = _app(tmp_path)
+    good = hv.Curve([1, 2, 3])
+    app._apply_result(RunResult("ok", good, 0.4, "", ""))
+    assert app.banner.visible is False
+
+    bad = hv.Image(np.zeros((4, 4))).opts(cmap="definitely_not_a_cmap")
+    app._apply_result(RunResult("ok", bad, 0.4, "", ""))
+    assert app.banner.visible is True
+    assert "failed to render" in app.banner.object
+    assert "✗" in app.status.object
+    assert not app._running
+    # last good plot untouched
+    assert isinstance(app.figure_pane.object, hv.Curve)
+
+    # recovery on the next good run
+    app._apply_result(RunResult("ok", hv.Curve([4, 5]), 0.3, "", ""))
+    assert app.banner.visible is False
+    assert "✓" in app.status.object
+
+
+def test_tick_survives_unexpected_apply_error(tmp_path: Path, monkeypatch) -> None:
+    """The periodic callback must never die: unexpected errors hit the guard."""
+    app = _app(tmp_path)
+
+    def broken_apply(result):
+        raise RuntimeError("kapow")
+
+    monkeypatch.setattr(app, "_apply_result", broken_apply)
+    app._results.put(RunResult("ok", None, 0.1, "", ""))
+    app._running = True
+    app.tick()  # must not raise
+    assert not app._running
+    assert "internal error" in app.status.object
+    assert app.banner.visible is True
+
+
 def test_full_loop_with_real_subprocess(tmp_path: Path) -> None:
     """Watcher-triggered run end to end (worker thread + queue drain)."""
     app = _app(tmp_path)

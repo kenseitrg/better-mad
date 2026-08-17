@@ -89,7 +89,15 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
   (old params emit PendingDeprecationWarning).
 - App convention: background work (script runs) posts results through a
   `queue.Queue` drained by a periodic `tick()` callback — never mutate widgets from
-  worker threads directly (see `app/preview.py`).
+  worker threads directly (see `app/preview.py`). Two hard rules for `tick()`:
+  (1) it must never raise (bokeh disables a periodic callback that dies — the whole
+  session freezes), so result application is try/except-guarded; (2) `queue.Empty`
+  is an `Exception` subclass — catch it explicitly before any broad `except Exception`.
+- HoloViews gotcha: opts are **lazy** — invalid values (e.g. a bad cmap) pass through
+  the script subprocess fine and only raise at **render time in the app process**.
+  Preview validates figures with a headless `hv.render()` before swapping them into
+  the live layout (a mid-sync exception can wedge the page), then degrades to a
+  banner keeping the last good plot.
 - Panel gotcha: `FastListTemplate` registers sidebar objects at doc init —
   **replacing sidebar objects after serving never reaches the live page**. Mutate a
   stable container's children instead.

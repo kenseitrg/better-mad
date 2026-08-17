@@ -68,6 +68,15 @@ The new engine; fully headless and pytest-covered.
   dimensions under fit sizing policies (measured: 494×355 canvas in a 1560×799
   figure; sizing_mode="stretch_both" no better). Demo + skills omit it; proper
   equal-aspect support is future work (needs client-side size reconciliation).
+- Post-review fix 5 ("invalid opts hang the app in running state"): opts are lazy —
+  an invalid cmap passes through the subprocess and raises at render time in the app
+  process; the exception escaped `tick()` and froze the session. Fixes: figures are
+  validated with a headless `hv.render()` before the pane swap (mid-sync exceptions
+  can wedge the page), render failures degrade to a banner + last good plot, the
+  worker converts any exception to an error result (`_running` can no longer wedge),
+  and `tick()` itself is exception-guarded (a dead periodic callback kills the whole
+  session; note `queue.Empty` is an Exception subclass — catch it before broad
+  handlers). Verified live: good → bad cmap → fixed recovers with last-good retention.
 - Diagnostics note: Panel 1.9 renders pane content inside **Shadow DOM** — page
   scripts must traverse `shadowRoot`s (plain `querySelector` finds nothing).
   R1 (Terminal widget) still open for M3.

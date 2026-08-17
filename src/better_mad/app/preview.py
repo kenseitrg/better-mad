@@ -115,8 +115,12 @@ class PreviewApp:
 
     def tick(self) -> None:
         """One polling step: drain finished runs, then debounce-trigger new ones."""
-        with contextlib.suppress(queue.Empty):
+        try:
             self._apply_result(self._results.get_nowait())
+        except queue.Empty:
+            pass
+        except Exception as exc:  # the periodic callback must never die
+            self._apply_guard(exc)
 
         # a manual Run clicked mid-flight fires as soon as the current run lands
         if not self._running and self._pending_run:
@@ -169,8 +173,12 @@ class PreviewApp:
         stamp = datetime.now().strftime("%H:%M:%S")
         if result.status == "ok" and result.figure is not None:
             figure = with_preview_sizing(result.figure)
+            try:
+                self._show_figure(figure)
+            except Exception as exc:  # invalid opts etc. raise at render time
+                self._show_failure("figure failed to render", f"{exc}", stamp)
+                return
             self._last_good = (figure, stamp)
-            self._show_figure(figure)
             self._hide_banner()
             self._set_status(f"✓ ran in {result.duration_s:.1f} s ({stamp})")
         elif result.status == "ok":
@@ -184,18 +192,45 @@ class PreviewApp:
         else:
             self._show_failure("plot.py failed", result.stderr, stamp)
 
+    def _apply_guard(self, exc: Exception) -> None:
+        """Last-resort handler: keep the session alive after an unexpected error."""
+        self._running = False
+        self._pending_run = False
+        self.banner.object = f"**⚠ internal error**\n\n```\n{exc!r}\n```"
+        self.banner.visible = True
+        self._set_status("✗ internal error")
+
     def _show_figure(self, figure: object) -> None:
         """Swap in a fresh HoloViews pane for the figure.
 
         Recreating the pane (instead of setting ``.object`` on the existing one)
         guarantees the bokeh figure initializes inside a laid-out container —
         in-place updates that land during document init render at 0 height.
+
+        The figure is validated by a headless render first: invalid opts raise at
+        render time, and raising *before* touching the live layout keeps the
+        session's layout intact (a mid-sync exception can wedge the page).
         """
+        import holoviews as _hv
+
+        if "bokeh" not in _hv.Store.loaded_backends():
+            _hv.extension("bokeh")
+        _hv.render(figure)  # validation only; discards the model
         new_pane = pn.pane.HoloViews(figure, sizing_mode="stretch_both")
+        idx = None
         for i, obj in enumerate(self.center.objects):
             if obj is self.figure_pane:
-                self.center[i] = new_pane
+                idx = i
                 break
+        if idx is None:
+            raise RuntimeError("figure pane lost from layout")
+        old_pane = self.figure_pane
+        try:
+            self.center[idx] = new_pane
+        except Exception:
+            with contextlib.suppress(Exception):
+                self.center[idx] = old_pane  # best-effort restore
+            raise
         self.figure_pane = new_pane
         self._placeholder.visible = False
 
