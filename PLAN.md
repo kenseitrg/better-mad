@@ -33,13 +33,20 @@ The new engine; fully headless and pytest-covered.
   points in 0.8 s; 14 new tests (62 total). Skill file + starter script + manifest ship
   in `core/templates`; R2 (hv pickling) verified across the subprocess boundary.
 
-## M2 — Preview pane + minimal app (2 days)
+## M2 — Preview pane + minimal app (2 days) ✅ done
 - Panel app: header (Run, auto-run toggle, status line) + center preview only.
 - Consume runner results: render figure; last-good-plot retention with staleness
   badge; error banner with stderr tail; "no show()" placeholder.
 - File watcher on `plot.py` (debounced ~0.5 s) driving auto-run.
 - **Exit:** edit `plot.py` by hand in an external editor → preview updates live;
-  break the script → last good plot stays up with error banner.
+  break the script → last good plot stays up with error banner. ✔ headless:
+  watcher-driven real-subprocess re-run test + failure-path tests (10 new, 72 total);
+  live: server boots, external edit → re-run with zero server-side tracebacks.
+  Implementation notes: PreviewApp state machine is tick/queue-based (no bokeh
+  threading primitives — headless-testable); watcher = 250 ms polling + 0.5 s
+  debounce + `_ran_mtime` guard (R3 mitigation); Panel 1.7 deprecations handled
+  (`label`/`color` instead of `name`/`button_type`). R1 (Terminal widget) still open
+  for M3.
 
 ## M3 — Full shell: terminal, editor, files panel (3–4 days)
 - Left: embedded terminal (Panel Terminal widget / pty), cwd = workspace, restart action.

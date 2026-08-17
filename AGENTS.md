@@ -23,8 +23,8 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M1 done** — data core, workspace, SDK & runner all headless-green. Next
-  step: milestone **M2** — preview pane + minimal app (PLAN.md).
+- Phase: **M2 done** — headless engine + minimal preview app live. Next step:
+  milestone **M3** — full shell: terminal, editor, files panel (PLAN.md).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -80,6 +80,11 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
 - Panel gotcha: most widgets default to `width=300, sizing_mode=None`; set
   `sizing_mode="stretch_width"` on widgets in narrow containers. `pn.config.raw_css`
   is a **list** — append, never `+=`.
+- Panel gotcha (1.7+): `Widget.name` → `label`, `Button.button_type` → `color`
+  (old params emit PendingDeprecationWarning).
+- App convention: background work (script runs) posts results through a
+  `queue.Queue` drained by a periodic `tick()` callback — never mutate widgets from
+  worker threads directly (see `app/preview.py`).
 - Panel gotcha: `FastListTemplate` registers sidebar objects at doc init —
   **replacing sidebar objects after serving never reaches the live page**. Mutate a
   stable container's children instead.
