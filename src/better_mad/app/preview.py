@@ -86,22 +86,22 @@ class PreviewApp:
         self.run_button.on_click(self.manual_run)
         self.auto_run = pn.widgets.Checkbox(label="Auto-run", value=True)
         self.status = pn.pane.Markdown("_idle_", sizing_mode="stretch_width")
+        #: Recreated per successful run (see _show_figure): mutating a pane's
+        #: object in place can produce 0-height figures when the update lands
+        #: while the session document is still initializing.
         self.figure_pane = pn.pane.HoloViews(None, sizing_mode="stretch_both")
         self.banner = pn.pane.Alert(
             "", alert_type="danger", visible=False, sizing_mode="stretch_width"
         )
         self._placeholder = pn.pane.Markdown(_PLACEHOLDER_EMPTY, sizing_mode="stretch_width")
         self.center = pn.Column(
-            self.banner, self._figure_or_placeholder(), sizing_mode="stretch_both"
+            self.banner, self.figure_pane, self._placeholder, sizing_mode="stretch_both"
         )
 
     # --- layout helpers -----------------------------------------------------
 
     def header(self) -> pn.Row:
         return pn.Row(self.run_button, self.auto_run, self.status, sizing_mode="stretch_width")
-
-    def _figure_or_placeholder(self) -> pn.Column:
-        return pn.Column(self._placeholder, self.figure_pane, sizing_mode="stretch_both")
 
     # --- watcher state machine ----------------------------------------------
 
@@ -160,9 +160,7 @@ class PreviewApp:
         if result.status == "ok" and result.figure is not None:
             figure = with_preview_sizing(result.figure)
             self._last_good = (figure, stamp)
-            self.figure_pane.object = figure
-            self._placeholder.visible = False
-            self.figure_pane.visible = True
+            self._show_figure(figure)
             self._hide_banner()
             self._set_status(f"✓ ran in {result.duration_s:.1f} s ({stamp})")
         elif result.status == "ok":
@@ -176,11 +174,24 @@ class PreviewApp:
         else:
             self._show_failure("plot.py failed", result.stderr, stamp)
 
+    def _show_figure(self, figure: object) -> None:
+        """Swap in a fresh HoloViews pane for the figure.
+
+        Recreating the pane (instead of setting ``.object`` on the existing one)
+        guarantees the bokeh figure initializes inside a laid-out container —
+        in-place updates that land during document init render at 0 height.
+        """
+        new_pane = pn.pane.HoloViews(figure, sizing_mode="stretch_both")
+        for i, obj in enumerate(self.center.objects):
+            if obj is self.figure_pane:
+                self.center[i] = new_pane
+                break
+        self.figure_pane = new_pane
+        self._placeholder.visible = False
+
     def _show_failure(self, headline: str, stderr: str, stamp: str) -> None:
         if self._last_good is not None:
             _, good_stamp = self._last_good
-            self.figure_pane.visible = True
-            self._placeholder.visible = False
             note = f" — showing last good result ({good_stamp})"
         else:
             self.figure_pane.visible = False
@@ -201,21 +212,22 @@ class PreviewApp:
         self.status.object = text
 
 
-def make_view(workspace: Workspace) -> pn.template.FastListTemplate:
+def make_view(workspace: Workspace) -> pn.template.VanillaTemplate:
     """One app session: PreviewApp + periodic watcher + initial run.
 
-    Served inside a FastListTemplate because bokeh's "fit" sizing policies need
-    a container with a definite height — a bare served Column has none, and the
-    figure collapses (observed: .bk-layer at ~54 px). The template's main area
-    provides it; M3 extends this shell with terminal/files panels.
+    Served inside a VanillaTemplate because bokeh's "fit" sizing policies need a
+    definite-height container chain. FastListTemplate wraps each main item in a
+    content-sized fast-card (measured: card fills #main, but its shadow-DOM slot
+    stays content-sized), collapsing figures to ~40-70 px; VanillaTemplate's main
+    propagates height cleanly (measured: figure fills the viewport). M3 extends
+    this shell with terminal/files panels.
     """
     hv.extension("bokeh")
     app = PreviewApp(workspace)
     pn.state.add_periodic_callback(app.tick, POLL_MS)
     app.start_run()  # show whatever plot.py currently holds on open
-    return pn.template.FastListTemplate(
+    return pn.template.VanillaTemplate(
         title="better-mad",
         header=[app.header()],
         main=[app.center],
-        main_max_width="",
     )

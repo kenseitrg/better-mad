@@ -163,7 +163,9 @@ bm.show(pts)  # registers the figure as the preview output
 - `bm.data(name)` returns the parsed DataFrame (from the parquet cache — instant).
 - `bm.show(obj)` serializes the HoloViews object to an app-provided output path
   (pickle, local-only transport). Accepted: `hv.Element`, `Overlay`, `Layout`,
-  `NdLayout`. Last `show()` wins.
+  `NdLayout`. Last `show()` wins. DynamicMaps (e.g. `rasterize()` output) don't
+  pickle; the SDK materializes them to their current frame — rasterized previews
+  are therefore static (pan/zoom work, no re-aggregation on zoom).
 - The runner captures **stdout/stderr**, enforces a **timeout** (default 60 s,
   configurable), and returns: figure, run time, stderr tail.
 - On failure: **the last good plot stays up** with a staleness badge; the error tail

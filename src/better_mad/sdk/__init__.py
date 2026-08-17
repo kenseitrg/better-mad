@@ -86,15 +86,39 @@ def data(name: str) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+def _materialize(obj: object) -> object:
+    """Replace DynamicMaps with their current frame so the figure pickles.
+
+    ``rasterize()``/``datashade()`` return DynamicMaps holding unpicklable local
+    closures (``Can't pickle local object 'Dynamic._dynamic_operation...'``).
+    Materializing yields a static frame — pan/zoom still work, but the raster is
+    not re-aggregated on zoom (accepted for v2; in-app re-rasterizing is future
+    work). Recurses through containers so nested DynamicMaps are covered.
+    """
+    try:
+        import holoviews as hv
+        from holoviews.core.spaces import DynamicMap
+    except ImportError:
+        return obj
+    if isinstance(obj, DynamicMap):
+        return obj[()]
+    if isinstance(obj, (hv.Layout, hv.NdLayout, hv.GridSpace, hv.NdOverlay)):
+        return obj.clone({k: _materialize(v) for k, v in obj.items()})
+    if isinstance(obj, hv.Overlay):
+        return hv.Overlay([_materialize(el) for el in obj])
+    return obj
+
+
 def show(obj: object) -> None:
     """Register a figure as the preview output. Last call wins.
 
     Accepts anything picklable; intended for HoloViews ``Element``, ``Overlay``,
-    ``Layout`` and ``NdLayout`` objects. The write is atomic, so a watching app
-    never reads a half-written figure.
+    ``Layout`` and ``NdLayout`` objects. DynamicMaps (e.g. ``rasterize()`` output)
+    are materialized to their current frame first. The write is atomic, so a
+    watching app never reads a half-written figure.
     """
     out = _output_path()
     tmp = out.with_suffix(".tmp")
     with open(tmp, "wb") as fh:
-        pickle.dump(obj, fh)
+        pickle.dump(_materialize(obj), fh)
     os.replace(tmp, out)

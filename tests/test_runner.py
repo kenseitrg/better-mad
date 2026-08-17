@@ -103,6 +103,23 @@ def test_opts_work_without_explicit_extension(tmp_path: Path) -> None:
     assert isinstance(result.figure, hv.Points)
 
 
+def test_datashaded_dynamicmap_is_materialized(tmp_path: Path) -> None:
+    """rasterize() returns an unpicklable DynamicMap; show() materializes it."""
+    ws = _ws_with_data(tmp_path)
+    ws.script_path.write_text(
+        "import datashader as ds\n"
+        "import holoviews as hv\n"
+        "from holoviews.operation.datashader import rasterize\n"
+        "import better_mad.sdk as bm\n"
+        "df = bm.data('sample_ws')\n"
+        "pts = hv.Points(df, kdims=['XCORD_MIDPT', 'YCORD_MIDPT'], vdims=['TR_DOMFREQ'])\n"
+        "bm.show(rasterize(pts, aggregator=ds.mean('TR_DOMFREQ')))\n"
+    )
+    result = run_script(ws)
+    assert result.status == "ok", result.stderr
+    assert isinstance(result.figure, hv.Image)
+
+
 def test_run_without_script_raises(tmp_path: Path) -> None:
     ws = create_workspace(tmp_path / "ws")
     ws.script_path.unlink()

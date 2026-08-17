@@ -40,13 +40,26 @@ The new engine; fully headless and pytest-covered.
 - File watcher on `plot.py` (debounced ~0.5 s) driving auto-run.
 - **Exit:** edit `plot.py` by hand in an external editor → preview updates live;
   break the script → last good plot stays up with error banner. ✔ headless:
-  watcher-driven real-subprocess re-run test + failure-path tests (10 new, 72 total);
-  live: server boots, external edit → re-run with zero server-side tracebacks.
-  Implementation notes: PreviewApp state machine is tick/queue-based (no bokeh
-  threading primitives — headless-testable); watcher = 250 ms polling + 0.5 s
-  debounce + `_ran_mtime` guard (R3 mitigation); Panel 1.7 deprecations handled
-  (`label`/`color` instead of `name`/`button_type`). R1 (Terminal widget) still open
-  for M3.
+  watcher-driven real-subprocess test + failure-path tests; live: verified with
+  headless Chromium (playwright, dev dep): 708k-point datashaded map fills the
+  viewport (1560×799 at 1600×900), zero server-side tracebacks. 15 new tests
+  (75 total).
+- Post-review sizing fixes (three layered bugs):
+  1. `rasterize()`/`datashade()` return **DynamicMaps that don't pickle**
+     (`Can't pickle local object 'Dynamic._dynamic_operation...'`) — `bm.show()`
+     now materializes them to their current frame (recursing through containers).
+     Consequence: datashaded previews are static rasters — pan/zoom work but do
+     not re-aggregate; in-app re-rasterizing is future work. R2 (M1) was only
+     verified for Elements before this.
+  2. **FastListTemplate wraps each main item in a content-sized fast-card**; its
+     shadow-DOM slot stays content-sized, so bokeh "fit" policies measured ~40 px
+     parents and collapsed. Switched to VanillaTemplate (clean height chain).
+  3. **Setting `pane.object` in place while the session document initializes
+     renders 0-height figures** (timing race: fast scripts finish before page
+     load). Fixed by recreating the HoloViews pane per figure (`_show_figure`).
+- Diagnostics note: Panel 1.9 renders pane content inside **Shadow DOM** — page
+  scripts must traverse `shadowRoot`s (plain `querySelector` finds nothing).
+  R1 (Terminal widget) still open for M3.
 
 ## M3 — Full shell: terminal, editor, files panel (3–4 days)
 - Left: embedded terminal (Panel Terminal widget / pty), cwd = workspace, restart action.
@@ -79,8 +92,9 @@ The new engine; fully headless and pytest-covered.
 ## Risks & spikes
 - **R1 Terminal widget** — spike Panel's pty Terminal early (M3 or sooner): spawn,
   resize, scrollback, cwd control. Fallback if inadequate: xterm.js in a custom pane.
-- **R2 HoloViews pickling** across the subprocess boundary — ✅ verified in M1:
-  Points/Curve survive pickle round-trip through the runner.
+- **R2 HoloViews pickling** across the subprocess boundary — ⚠ Elements/Curve
+  pickle fine, but **DynamicMaps don't** (rasterize/datashade closures); the SDK
+  materializes them to static frames (M2 fix). Overlays/Layouts of Elements OK.
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
 - **R4 Model capability floor** — if small local models fail even with skills,

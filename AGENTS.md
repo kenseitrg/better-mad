@@ -95,6 +95,20 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
   stable container's children instead.
 - CSS gotcha: JS layout shims must set the template's width **CSS variables**
   (`--sidebar-width` / `--right-sidebar-width`), never inline `min/max-width`.
+- Panel gotcha (1.9): pane content renders inside **Shadow DOM** — headless/page
+  diagnostics must traverse `shadowRoot`s or they will conclude (wrongly) that
+  nothing rendered.
+- Panel gotcha: **FastListTemplate wraps each main item in a content-sized
+  fast-card**; its shadow-DOM slot never gets a definite height, so bokeh "fit"
+  sizing collapses figures (~40–70 px). Use VanillaTemplate (or force the card
+  chain's height) for full-height plot areas.
+- Panel gotcha: setting a pane's `.object` **while the session document is still
+  initializing renders 0-height figures** (fast scripts finish before page load).
+  Recreate the pane with the figure at construction instead (`_show_figure`).
+- HoloViews gotcha: **DynamicMaps don't pickle** (`rasterize()`/`datashade()`
+  output holds local closures) — `bm.show()` materializes them to their current
+  frame; previews of rasterized plots are therefore static (no re-aggregation on
+  zoom).
 
 ## Commands (fill in as milestones land)
 ```bash
