@@ -90,13 +90,15 @@ workspace/
 Scripts run in a **subprocess** and talk to the app through a tiny SDK:
 
 ```python
+import holoviews as hv
+
 import better_mad.sdk as bm
 
-df = bm.data("file_a")          # DataFrame from the app's loaded datasets
-print(bm.list_data())           # available dataset names + shapes
+df = bm.data("file_a")  # DataFrame from the app's loaded datasets
+print(bm.list_data())  # available dataset names + shapes
 
 pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
-bm.show(hv.render(pts, ...))    # or just: bm.show(pts)
+bm.show(pts)  # registers the figure as the preview output
 ```
 
 - `bm.data(name)` returns the parsed DataFrame (from the parquet cache — instant).

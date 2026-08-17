@@ -5,14 +5,18 @@ v2 is the pivot to **agent-driven plotting** (design.md §2). The v1 codebase li
 
 Core rule (unchanged): **UI-free core first, Panel app is a thin layer on top.**
 
-## M0 — Scaffold + restore data core (1 day)
+## M0 — Scaffold + restore data core (1 day) ✅ done
 - New uv project (deps per design §9); package layout `better_mad/{core,app}`,
   `tests/`, CLI stub.
 - Restore from `archive/codebase`: `core/loading.py`, `core/columns.py`,
   `core/cache.py`, `core/dataset.py` (+ their tests and trimmed fixtures). Drop the
   v1 expression/composition/styles modules — composition is now the agent's job.
 - **Exit:** loader tests green on the restored code; both 121 MB sample files load
-  (first ≈11 s, cached ≈0.05 s, numbers from v1).
+  (first ≈11 s, cached ≈0.05 s, numbers from v1). ✔ 48 tests green; ruff + ty clean.
+  Cold parse of the 121 MB file 12.8 s, cached reload 0.08 s, 31 MB RAM — v1 numbers
+  confirmed. Bonus: three additional sample files (csv w/ sentinels, 229k-row
+  prestack, 2D-like) also load cleanly; dropped v1 `computed_columns` field and the
+  expression/composition/styles modules per the pivot.
 
 ## M1 — Workspace, SDK & runner (headless) (2–3 days)
 The new engine; fully headless and pytest-covered.
