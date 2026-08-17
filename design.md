@@ -85,6 +85,65 @@ workspace/
   (agent, user's editor, external editor) and triggers a run when auto-run is on.
 - Manual **Run** button always available; auto-run is a toggle.
 
+### 4.1 Interaction sequence
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant H as Agent harness<br/>(embedded terminal)
+    participant A as App<br/>(watcher + runner)
+    participant S as plot.py subprocess<br/>(better_mad.sdk)
+
+    Note over U,S: 1 · Startup
+    U ->> A: better-mad [files]
+    A --) A: create workspace: AGENTS.md, plot.py, datasets.md, .data/
+
+    Note over U,S: 2 · Import
+    U ->> A: Add files (picker)
+    A ->> A: parse → DataFrame (sentinels, float32, parquet cache)
+    A --) A: write .data/NAME.parquet
+    A --) A: rewrite datasets.md (columns, stats)
+
+    Note over U,S: 3 · Agent loop
+    U ->> H: start harness; describe the plot
+    H ->> H: read AGENTS.md + datasets.md
+    H --) A: write plot.py
+    A ->> A: watcher: debounce + stability check
+    A ->> S: spawn python plot.py<br/>env: BETTER_MAD_DATA_DIR, BETTER_MAD_OUTPUT
+    S ->> S: bm.data(NAME) reads .data/NAME.parquet
+    S --) A: bm.show(fig) pickles figure → BETTER_MAD_OUTPUT
+    S -->> A: exit 0 + stdout/stderr
+    A ->> A: unpickle figure
+    A -->> U: render preview (pan/zoom/select) · status ✓
+
+    Note over U,S: 4 · Manual tweak — same pipeline
+    U ->> A: edit plot.py in Code view, save
+    A ->> S: re-run (as in 3)
+    A -->> U: updated preview
+```
+
+Failure branch of step 3: if the subprocess exits non-zero or times out, the runner
+returns the traceback/stderr; the app keeps the **last good figure** with a staleness
+badge and shows the error tail as a banner (§5, UX §6). No write to `plot.py` happens
+on failure — only the user or the agent edits the script.
+
+### 4.2 File ledger
+
+Who touches which workspace file, and when:
+
+| File | Written by | Read by | Lifecycle |
+|------|-----------|---------|-----------|
+| `AGENTS.md` | app at workspace creation (never overwritten) | agent harness (per its conventions) | static within a version |
+| `datasets.md` | app, on every import/re-parse | agent harness, user | fully regenerated each time |
+| `plot.py` | agent harness; user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
+| `.data/NAME.parquet` | app, on import | SDK `bm.data()` in the subprocess | one per open dataset |
+| output pickle (temp) | SDK `bm.show()` | runner (unpickles), deleted after | one per run |
+
+Note the asymmetry that keeps the design simple: the app only ever writes *data and
+knowledge* files; the only file the agent/user writes is `plot.py`; the only file the
+app executes is `plot.py`.
+
+
 ## 5. SDK & runner
 
 Scripts run in a **subprocess** and talk to the app through a tiny SDK:
