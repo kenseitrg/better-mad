@@ -1,121 +1,76 @@
-# better-mad — Implementation Plan
+# better-mad — Implementation Plan (v2)
 
-Milestones ordered so that each ends with something runnable and demoable.
-Core rule: **UI-free core first, Panel app is a thin layer on top** (design §8).
+v2 is the pivot to **agent-driven plotting** (design.md §2). The v1 codebase lives on
+`archive/codebase`; its UI-free data core is restored in M0 rather than rewritten.
 
-## M0 — Project scaffold (½ day) ✅ done
-- uv project, deps: pandas, pyarrow, holoviews, panel, datashader, numexpr; dev: ruff, ty, pytest.
-- Package layout: `better_mad/{core,app}/`, `tests/`, CLI entry point stub (`better-mad`).
-- ruff + ty config; CI-less local checks script (`scripts/check.sh`).
-- **Exit:** `uv run better-mad` prints a banner; tests run green (trivial). ✔
-- Note: resolved on Python 3.11.15 with pandas 3.0.5 — watch pandas 3.x API changes in M1.
+Core rule (unchanged): **UI-free core first, Panel app is a thin layer on top.**
 
-## M1 — Data core (2–3 days) ✅ done
-The part everything else depends on; fully headless and tested.
-- Loader: delimiter detection (whitespace/csv/tab), header parse, decimal separator,
-  ragged-row/comment tolerance. Use `pd.read_csv(sep='\s+'|..., dtype=float32/64)`.
-- Column name sanitization (design §2.2) + display-name registry. Deterministic, collision-safe.
-- Null sentinels: configurable list per file, applied at load; **0 stays valid**.
-- Optional parquet cache in `~/.cache/better-mad` keyed by path+mtime+size+parser-settings hash.
-- Dataset model: name, path, DataFrame, parser settings, computed-column registry.
-- **Tests:** fixtures from trimmed copies of `data/14_01_*` (first ~1000 rows committed);
-  sentinel handling; name sanitization of `TR.DOMFREQ` / `3DT_*`; cache invalidation.
-- **Exit:** loading the real 121 MB file takes a reported, sane time; reload via cache is fast.
-  Measured: 708k×9 first load ≈11 s (python engine, `\s+`), cache reload ≈0.05 s (220×);
-  31 MB RAM per file thanks to float32.
+## M0 — Scaffold + restore data core (1 day)
+- New uv project (deps per design §9); package layout `better_mad/{core,app}`,
+  `tests/`, CLI stub.
+- Restore from `archive/codebase`: `core/loading.py`, `core/columns.py`,
+  `core/cache.py`, `core/dataset.py` (+ their tests and trimmed fixtures). Drop the
+  v1 expression/composition/styles modules — composition is now the agent's job.
+- **Exit:** loader tests green on the restored code; both 121 MB sample files load
+  (first ≈11 s, cached ≈0.05 s, numbers from v1).
 
-## M2 — Minimal web app + scatter/datashader (2–3 days) ✅ done
-- Panel server: `better-mad file1 file2 ...` → serves UI on `--port`, opens browser.
-- UI skeleton: file sidebar (loaded datasets + column list w/ display names),
-  main plot pane, per-plot controls.
-- Scatter plot element: x/y/z column pickers, datashader toggle per layer,
-  **warn-on-large-vector-render** (>~100k pts, overridable).
-- Hover annotations on vector layers (plotted x/y/z columns by default; user can add
-  extra columns to the tooltip — never dump all 20–30 columns). → tooltip column
-  picker lands with the M4 layer rework; plotted-cols default is in place.
-- **Exit:** both sample files loaded; scatter of `TR_DOMFREQ` vs `TR_RMSAMP` renders;
-  datashader toggle works at 708k rows. ✔ (R1 spike retired, color scatter added,
-  Add-plot crash fixed with pn.bind regression test)
+## M1 — Workspace, SDK & runner (headless) (2–3 days)
+The new engine; fully headless and pytest-covered.
+- Workspace model: create dir, write `AGENTS.md` skill file + `datasets.md` manifest;
+  regenerate manifest on dataset changes.
+- SDK (`better_mad/sdk`): `data(name)`, `list_data()`, `show(obj)` → pickle to the
+  runner-provided output path.
+- Runner: subprocess execution of `plot.py`; env wiring; stdout/stderr capture;
+  timeout (default 60 s); result = figure | error | timeout + run time.
+- **Tests:** script → figure round-trip; error/timeout paths; missing-dataset KeyError;
+  manifest content matches loaded datasets.
+- **Exit:** headless demo: load sample file → run a hand-written `plot.py` → get back
+  a HoloViews Points object.
 
-## M3 — Remaining v1 plot types (2–3 days) ✅ done
-- Histogram (bins, edges, log-y) + 1D KDE overlay, shared normalization.
-- 2D density layer (datashader aggregation: count default, mean optional).
-- Line graph (x-column picker, stride decimation in vector mode >50k rows; LTTB deferred).
-- Polar scatter (θ/r/z column pickers) — internal transform to keep azimuth work unblocked.
-  Convention: θ as-is (0–360°, no flipping by offset sign), r = |offset| (design §1#9).
-  Rendered under a polar graticule (matplotlib-polar look; Bokeh PolarTransform rejected
-  as it breaks the datashader path for zero user-visible gain — discussed, kept for v1).
-- Composition rules enforced in UI (design §4.2).
-- Post-review fixes: grouped control rows (no horizontal scroll), auto-select new tab,
-  polar z-color, datashader mean-of-z bug (rasterize aggregates first vdim — AGENTS.md).
-- **Exit:** every v1 plot type demonstrable on the sample data. ✔ (manually verified)
+## M2 — Preview pane + minimal app (2 days)
+- Panel app: header (Run, auto-run toggle, status line) + center preview only.
+- Consume runner results: render figure; last-good-plot retention with staleness
+  badge; error banner with stderr tail; "no show()" placeholder.
+- File watcher on `plot.py` (debounced ~0.5 s) driving auto-run.
+- **Exit:** edit `plot.py` by hand in an external editor → preview updates live;
+  break the script → last good plot stays up with error banner.
 
-## M4 — Layers, styling, color, comparison (2–3 days) ✅ done
-- App module split for maintainability: `app/layers.py` (LayerSpec/PlotSpec models +
-  pure render functions), `app/controls.py` (LayerRow + PlotControls widgets),
-  `app/views.py` (PlotTab orchestration). Rendering is now eager-on-change with
-  error-to-banner degradation; transient invalid states (e.g. x == y) get placeholders.
-- Layer manager: add/remove/reorder/hide layers; file-qualified column refs;
-  cross-file layers in one plot; column choices survive file swaps (same-schema).
-- Composition rules (design §4.2) enforced by restricting type pickers (xy family:
-  scatter/line/density2d; 1d family: histogram+density1d with shared normalization;
-  polar single-family). Invalid type switches snap back to a valid type.
-- Style panel: per-layer symbol/size/opacity/line-width/colormap in collapsible card;
-  plot options card: title, axis labels, axis limits, log axes, legend on/off+position,
-  equal aspect for maps.
-- Color system: per-layer colormap, percentile clip (default 2–98%, disable = 0–100),
-  explicit min/max, log color scale (cnorm), **locked shared color scale** across all
-  layers of a plot (locked scale beats per-layer overrides).
-- "⧉ Duplicate" + swap-file selector → comparison plot with identical parameters.
-- **Exit:** the two sample files compared with identical parameters and locked color
-  scale ✔ (headless smoke test: duplicate b4/after, columns kept, clim identical on both).
-- Post-review UI refinement (1920×1080 target): layer blocks + plot options moved into
-  a right-hand style drawer that follows the active tab; center workspace is plot-only;
-  figures resize responsively via a bokeh sizing-policy hook (`fit/fit`), since
-  HoloViews exposes no sizing-policy opts. Layer blocks restacked for the narrow
-  drawer (≤2 widgets per row, style card collapsed).
-- Post-review UI pass 2 (cropping/scrollbars/resize): drawer is now the template's
-  **native right sidebar** (collapsible, follows active tab); both sidebars
-  **drag-resizable** (JS shim sets width CSS variables — inline widths would break
-  the collapse buttons — and persists to localStorage); fixed Panel's 300px default
-  widget width overflow (all drawer widgets `sizing_mode="stretch_width"`), which
-  caused the drawer's horizontal scrollbar and the sidebar's cropped cards. Drawer
-  content lives in one stable container mutated in place (sidebar objects replaced
-  after doc-init never reach the live page). Stack re-visit resolved: **Panel stays**
-  (design §1#10).
-- Datashader styling pass: **opacity applies to datashaded layers** (HoloViews maps
-  `alpha` to the Image glyph's `global_alpha`); symbol size/symbol, line width and
-  base color have no glyph to style once rasterized, so their controls hide when
-  Datashader is on (UX §5: disable invalid options).
+## M3 — Full shell: terminal, editor, files panel (3–4 days)
+- Left: embedded terminal (Panel Terminal widget / pty), cwd = workspace, restart action.
+- Center: Preview ⟷ Code toggle; code editor bound to `plot.py` (Ctrl+S + debounced
+  auto-save); external-change policy (clean → reload; dirty → Reload/Overwrite banner);
+  collapsed Output drawer with last run's stdout/stderr.
+- Right: file cards with column lists + click-to-copy sanitized names, import settings
+  block (delimiter/sentinels/re-parse), close-file confirm when referenced.
+- Drag-resizable columns, widths persisted (CSS-variable mechanism from v1).
+- **Exit:** the full loop in one window: import → ask agent (or hand-edit) → preview,
+  with all three panels functional at 1920×1080.
 
-## M5 — Filtering + expressions (2–3 days)
-- Filter panel per file: range sliders + value predicates on selected columns, AND-composed,
-  live-applied to all layers of that file.
-- Expression engine (pandas.eval/numexpr): grammar + function library per design §3,
-  sanitized-name references, `{Original.Name}` quoting, lazy materialization + cache,
-  computed columns appear in pickers with a marker.
-- **Tests:** expression correctness incl. NaN propagation; filter semantics.
-- **Exit:** e.g. filter `STACK_WORD == 1`, plot `(A-B)/(A+B)`-style ratios.
+## M4 — Agent skills & end-to-end validation (2–3 days)
+- Author the workspace `AGENTS.md`: SDK reference, hard rules, and complete runnable
+  recipes for: colored scatter map (equal aspect, datashaded), crossplot, histogram,
+  line/CMP gather, percentile-clipped colormaps, hover/selection via streams.
+- Encode v1 gotchas (rasterize-first-vdim, sizing policies, pandas-3 parsing).
+- Validate with at least two harnesses (one cloud, one local) against the sample
+  files; fix skill wording where models stumble.
+- **Exit:** a small/local model produces a correct datashaded map of the 708k-row
+  sample file by following the skills, without user code edits.
 
-## M6 — Sessions, configs, PNG export (2 days)
-- Plot-config JSON schema (data refs, layers, styles, filters, limits); save/load/apply-to-other-file.
-- Session JSON: files + parser settings + plots + layout; save/load; missing-file tolerance.
-- PNG export via HoloViews matplotlib backend (per-plot button, DPI option).
-- **Exit:** round-trip: session → quit → reload → identical plots; PNG output.
-
-## M7 — Polish & packaging (1–2 days + stretch)
-- UX pass: error toasts, load-progress indicators, sensible defaults, empty states.
-- Selected-points export (CSV, user-chosen columns) — lower priority, cut if needed.
-- **Stretch:** AppImage via PyInstaller (validate numba/datashader freezing early in a spike!).
+## M5 — Polish (1–2 days)
+- Status-line detail (rows rendered, run time), empty/first-launch states,
+  terminal hint text, README security note.
+- Bug pass on watcher races (agent multi-write bursts), editor/agent conflicts.
+- **Stretch (future milestones, design §11):** script history/diff, PNG export,
+  session persistence, selection→CSV, embedded SDK chat panel.
 
 ## Risks & spikes
-- **R1 Datashader+Panel selection/hover quirks** → ✅ spiked & verified with 708k rows:
-  rasterize + live toggle + hover all work; vector mode usable up to ~700k (slower).
-  Kept observations: wheel-zoom lag in datashader mode; multi-point hover when zoomed out
-  (both recorded in design §5.1, accepted for v1).
-- **R2 AppImage freezing of numba/datashader** → do a throwaway freeze spike before M7;
-  drop to stretch if painful (design already allows CLI-only distribution).
-- **R3 Memory at 2M rows × several files** → float32 default + parquet cache mitigate;
-  measure in M1 with a synthetic 2M-row file.
+- **R1 Terminal widget** — spike Panel's pty Terminal early (M3 or sooner): spawn,
+  resize, scrollback, cwd control. Fallback if inadequate: xterm.js in a custom pane.
+- **R2 HoloViews pickling** across the subprocess boundary — verify in M1 that
+  Overlays/Layouts + datashader hooks survive pickle in the same env.
+- **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
+  never run a script that is mid-write (stability check: unchanged for N ms).
+- **R4 Model capability floor** — if small local models fail even with skills,
+  mitigation is richer recipes/templates, not a product change (design §8).
 
-## Rough total: ~2.5–3 weeks of focused work to end of M6 (v1 complete).
+## Rough total: ~2 weeks of focused work to end of M5 (v2 complete).

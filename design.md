@@ -1,9 +1,11 @@
-# better-mad — Design
+# better-mad — Design (v2: agent-driven plotting)
 
-Seismic attribute visualization tool: load tabular attribute files, explore them
-interactively with layered, configurable plots, and export figures.
+An LLM-agent-driven instrument for visualizing seismic attributes: load large tabular
+text files, tell an agent what you want to see, get back a plotting **script** plus an
+**interactive preview** — then refine either by hand or through the agent.
 
-**v1 focus: visualization quality and general UX.** Everything else is ranked below it.
+The v1 design (declarative plotting UI, milestones M0–M4 implemented) is preserved on
+the `archive/codebase` branch.
 
 ---
 
@@ -11,180 +13,172 @@ interactively with layered, configurable plots, and export figures.
 
 | # | Topic | Decision |
 |---|-------|----------|
-| 1 | Frontend stack | **HoloViews + Panel + Datashader** |
-| 2 | Distribution | CLI starts a Panel web server on localhost; user works in the system browser. AppImage packaging of this CLI is a **stretch goal**, not v1 |
-| 3 | Polar/radial plots | Generic polar scatter where user-supplied columns provide θ and r. Pre-stack offset/azimuth workflows are **future work**, but the polar machinery must not block them |
-| 4 | Map view | Scatter only. **No gridding/interpolation in v1** |
-| 5 | Line grouping | No grouping needed for 3D data. For 2D lines, the user's file contains an explicit line-number column; group by a user-selected categorical column (**future work**, design must not block it) |
-| 6 | Nulls | Configurable null sentinels per file. **0 is always a valid value** |
-| 7 | Cross-file expressions/joins | Deferred; needs its own design pass (join keys, alignment) |
-| 8 | Persistence | Save/load plot configurations and full sessions |
-| 9 | Polar convention | Azimuths arrive in 0–360° and are used **as-is** — never flipped by offset sign. Radius uses the **absolute value** of the offset column |
-| 10 | Frontend stack re-visited (M4) | After UI-feedback ("Panel too limiting?"), **Panel stays**: the layout complaints traced to implementation bugs (Panel widgets' 300px default width; unused native right sidebar), all fixable. Switching would cost the HoloViews↔Datashader interactivity, and the UI-free core means the app layer can still be swapped later without touching core |
+| 1 | Product direction | **Instrument, not omnibus**: no attempt to menu-ify every plot type. Users get a programmable surface (agent + editable code) they can tailor |
+| 2 | Agent integration | **Embedded terminal** (pty) in the left panel. Harness-agnostic: the user runs their preferred agent CLI (pi, claude-code, codex, aider, local-model CLI…). No SDK/chat embedding in v2 |
+| 3 | Agent ↔ app protocol | **Filesystem**. The agent edits the plot script; the app watches the file and re-runs it. No sockets, no proprietary protocol |
+| 4 | Plotting stack | **HoloViews + Panel + Datashader** (carried over from v1; handles 1–2M-row files natively) |
+| 5 | Code execution | **Subprocess runner** with a small SDK (`show()` transport). Generated code never executes inside the app/server process |
+| 6 | Script model | One active script (`plot.py`) per workspace in v2. Multiple scripts/tabs: future work |
+| 7 | Code editing | Center pane toggles **Preview ⟷ Code**; the editor edits the same `plot.py` the agent writes. External changes reload the editor |
+| 8 | Data loading | Reuse the v1 core loader from `archive/codebase`: delimiter detect, hostile-header sanitization, configurable null sentinels, float32, parquet cache |
+| 9 | Agent knowledge | Workspace ships an **`AGENTS.md` skill file + auto-generated dataset manifest** so even small local models can produce correct plots by adapting recipes |
+| 10 | Sandbox | **None.** Scripts run with the user's own privileges — same trust model as running the agent in a normal terminal. Documented, not hidden |
+| 11 | Distribution | Unchanged: CLI starts a Panel server on localhost, opens the system browser |
 
 ---
 
-## 2. Input data
+## 2. Concept
 
-### 2.1 Format
-- Plain-text tabular files: **whitespace-delimited (default)**, comma, tab, or custom
-  delimiter — user-selectable per file, with auto-detect as convenience default.
-- First row is a header with attribute names.
-- No file extensions expected (`14_01_post_stack_attr_after_scac_all` style); the app
-  must not rely on extensions.
-- Decimal separator configurable (`.` default, `,` optional).
-- Ragged rows: short rows are padded with NaN, over-long rows skipped; comment lines
-  (`#` by default) are ignored. Never crash the load.
+Instead of building the perfect plotting UI for every case, better-mad provides an
+instrument the user tailors:
 
-### 2.2 Column names
-Real headers contain characters that are invalid in expressions and awkward in APIs
-(`TR.DOMFREQ`, `3DT_SEC_ORD_CELCTR`), so:
-- Each column gets a **sanitized internal name** (e.g. `TR_DOMFREQ`, `X3DT_SEC_ORD_CELCTR`)
-  used in expressions and APIs.
-- The **original name is preserved** for all display purposes (axes, legends, pickers).
-- Mapping must be deterministic and collision-free (suffix on collision).
+```
+import files → describe intent to the agent → agent writes plot.py
+            → app runs it → interactive preview
+            → adjust: edit the code by hand, or talk to the agent
+```
 
-### 2.3 Null sentinels
-- Per-file list of sentinel values (e.g. `-999.25`, `-9999`, `1e30`), applied at load
-  time → converted to NaN. Sentinels may be numeric or **string tokens (`NULL`)**.
-- Defaults provided (`-999.25, -999, -9999, -99999, 1e30, "NULL"` — matching common
-  processing-software conventions), user-editable per file.
-- `0.0` is never treated as null automatically.
+- The **agent does the composition**: picking columns, choosing plot types, styling,
+  datashader usage — all the things v1 expressed as menus.
+- The **code is the configuration**: fully visible, fully editable, version-controllable.
+- The **app provides the substrate**: robust loading of hostile 1–2M-row files, a safe
+  runner, a live interactive preview, and skill material that makes small models capable.
 
-### 2.4 Scale & performance
-- Target: files with **1–2 million rows**, possibly several files open.
-- Load pipeline: parse → pandas DataFrame (float32 by default for attribute columns to
-  halve memory; float64 for coordinates). Report load time and row count in the UI.
-- Optional **parquet cache**: after first load, write a cached `.parquet` under
-  `~/.cache/better-mad/` (data directories are often read-only), keyed by
-  path+mtime+size+parser-settings; subsequent loads of an unchanged file read the cache.
-- Rendering:
-  - **Datashader is a per-plot toggle, selectable at any dataset size.**
-  - Default: warn when rendering >~100k points in vector (non-datashader) mode; user can
-    override.
-  - Line plots with very many points need decimation (e.g. LTTB) in vector mode;
-    datashader mode needs none.
+## 3. Layout
 
----
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Header: workspace · [Run] [Auto-run ✓] · run status              │
+├────────────────┬─────────────────────────────┬───────────────────┤
+│ Agent terminal │  Center                     │ Files             │
+│ (any CLI       │  [Preview | Code] toggle    │ ▸ file_a 708k rows│
+│  harness,      │  • live interactive plot    │   columns + stats │
+│  user's choice)│  • or editable plot.py      │ ▸ file_b …        │
+│                │                             │ [Add files…]      │
+└────────────────┴─────────────────────────────┴───────────────────┘
+```
 
-## 3. Expression engine (on-the-fly column arithmetic)
-- Grammar: arithmetic (`+ - * / // ** %`), comparisons, unary ops, parentheses;
-  function library: `abs, log, log10, sqrt, exp, clip, where, normalize, percentile`.
-- Column references use the **sanitized names**; the UI picker inserts them, so the user
-  rarely types. A quoting syntax (e.g. `{Original.Name}`) resolves ambiguous cases.
-- Implementation: `pandas.eval`/numexpr-based (fast, safe — no arbitrary code execution).
-- Computed columns are materialized lazily and cached; they show up as regular columns
-  with a marker in the UI.
-- Expressions operate **within one file** in v1. Cross-file operations are deferred (§9).
+- **Left — terminal**: pty-backed terminal widget; the app spawns a shell there, the
+  user launches whatever agent harness they like. cwd is the workspace directory.
+- **Center — preview/code**: the rendered figure (HoloViews pane) or a code editor bound
+  to `plot.py`. Toggle is instant; both stay alive.
+- **Right — files**: open datasets with columns (original display names + sanitized
+  names), row counts, quick stats; import entry point.
 
----
+## 4. Workspace & agent protocol
 
-## 4. Plot system
+The app owns a **workspace directory** (created per session; path shown in header):
 
-### 4.1 Plot types (v1)
-| Type | Notes |
-|------|-------|
-| Scatter (XY) | map views and crossplots |
-| Color scatter | third column mapped to color |
-| Polar scatter | user picks θ column, r column, and optional z (color). θ is used as-is (0–360° convention, §1#9); r = \|offset\| — offset sign never modifies azimuth. Rendered on a polar graticule (matplotlib-polar style; Bokeh has no native polar axes) |
-| Histogram | continuous column, configurable bin count/edges, linear or log y |
-| Density (1D) | KDE over a column, overlayable on histogram |
-| 2D density | datashader aggregation as image layer: count (default) or mean of a z column |
-| Line graph | attribute vs an x column (CMP, CDP, index…) |
+```
+workspace/
+├── AGENTS.md        # skill file: SDK reference, conventions, recipes, pitfalls
+├── datasets.md      # auto-generated manifest of loaded data (names, columns, stats)
+└── plot.py          # the one active plotting script (agent- and user-edited)
+```
 
-Deferred (future work, design must not block): rose diagram (needs azimuth input data),
-bar chart for categorical columns, 2D line grouping.
+- The terminal starts with cwd = workspace, so any harness picks up `AGENTS.md`
+  according to its own conventions — no per-harness integration needed.
+- `datasets.md` is regenerated on every import/re-parse: file names, row counts,
+  original + sanitized column names, dtype, min/max/NaN%. This is what lets a small
+  model know the data without reading 121 MB files.
+- A **file watcher** (debounced ~0.5 s) detects changes to `plot.py` from any writer
+  (agent, user's editor, external editor) and triggers a run when auto-run is on.
+- Manual **Run** button always available; auto-run is a toggle.
 
-### 4.2 Layers & composition
-- Every plot holds an ordered list of **layers**; each layer references a loaded file
-  (or computed column), a plot type, and a style block.
-- Layers from **different files** may coexist in one plot. Column references are therefore
-  always file-qualified internally.
-- Composition rules (what can overlay what):
-  - scatter + scatter, scatter + line, scatter + 2D density image: OK
-  - histogram + density curve: OK (shared normalization: density scaled to counts or %)
-  - arbitrary mixing is not promised; the UI exposes only valid combinations.
-- Datashader toggle is **per layer**; a plot may mix vector and raster layers.
+## 5. SDK & runner
 
-### 4.3 Styling (user-configurable)
-Legend (on/off, position, labels), symbol, size, opacity, colormap, axis labels, titles,
-axis limits, log/linear axes, equal aspect for map views (UTM coordinates), grid lines.
+Scripts run in a **subprocess** and talk to the app through a tiny SDK:
 
-### 4.4 Color handling (required, not optional)
-- Per-layer colormap selection.
-- **Percentile clipping** (default e.g. 2–98%) for heavy-tailed attribute distributions;
-  explicit min/max override.
-- Log color scale option.
-- **Shared color scale across layers/plots** for precise dataset comparison (point 15 of
-  the original draft): a "lock color scale" control applying to selected layers.
+```python
+import better_mad.sdk as bm
 
-### 4.5 Comparison workflow
-Multiple datasets (e.g. `*_b4_scac_all` vs `*_after_scac_all`) with identical
-visualization parameters and axis/color limits. Supported via:
-- duplicating a layer/plot and swapping the file,
-- locked/shared axis and color limits (§4.4),
-- session templates (§6).
+df = bm.data("file_a")          # DataFrame from the app's loaded datasets
+print(bm.list_data())           # available dataset names + shapes
 
----
+pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
+bm.show(hv.render(pts, ...))    # or just: bm.show(pts)
+```
 
-## 5. Interactivity
-- Pan/zoom everywhere (Panel/HoloViews defaults).
-- **Hover annotations** on vector layers: show the plotted columns (x, y, and color/z if
-  present) by default; the user can add extra columns to the hover tooltip per layer.
-  Never annotate the full attribute list — files can have 20–30 columns.
-  Known limitation: datashaded layers are raster images — no per-point hover. v1 accepts
-  this; a nearest-point lookup on tap is a future enhancement.
-- **Filtering**: per-file filter panel — range sliders/value filters on user-selected
-  columns; filters apply to all layers using that file. Filters compose (AND).
-- **Selection/lasso**: HoloViews linked selection where supported; feeds the (lower
-  priority) point export (§7).
+- `bm.data(name)` returns the parsed DataFrame (from the parquet cache — instant).
+- `bm.show(obj)` serializes the HoloViews object to an app-provided output path
+  (pickle, local-only transport). Accepted: `hv.Element`, `Overlay`, `Layout`,
+  `NdLayout`. Last `show()` wins.
+- The runner captures **stdout/stderr**, enforces a **timeout** (default 60 s,
+  configurable), and returns: figure, run time, stderr tail.
+- On failure: **the last good plot stays up** with a staleness badge; the error tail
+  renders as a banner in the center pane. Never a crash, never a modal.
+- The runner is core (headless, pytest-covered); the preview pane is a thin consumer.
 
-### 5.1 Known interactivity limitations (observed in R1 spike)
-- Mouse-wheel zoom in datashader mode feels laggy under rapid zooming (each wheel event
-  triggers a re-aggregation); box-zoom feels instant. Acceptable for v1; throttling or
-  multi-level caching is future work.
-- Hover when fully zoomed out annotates several points under the cursor at once
-  (Bokeh hit-testing); hover when deeply zoomed in is likewise unreliable. Accept
-  for v1.
+## 6. Input data (carried over from v1)
 
----
+All v1 loader requirements stay — they are exactly why this tool exists:
 
-## 6. Configurations & sessions
-- Every plot's full state (data refs, plot type, layers, styles, filters, limits) is
-  serializable to **JSON** (chosen over YAML: zero extra dependencies).
-- **Plot config**: one plot's state; saveable/loadable as a template, applicable to other
-  files (the comparison workflow depends on this).
-- **Session**: all loaded files (paths + parser settings + sentinels) + all plots + layout.
-  Save/load from the UI. File paths stored as-given; missing files degrade to a warning,
-  not a crash.
+- Whitespace/comma/tab-delimited text, first row header, no extensions, hostile names
+  (`TR.DOMFREQ`, `3DT_SEC_ORD_CELCTR`) → sanitized internal names, originals kept for
+  display. Ragged/comment rows tolerated. Never crash the load.
+- Configurable null sentinels per file (numeric or string tokens); **0 is always valid**.
+- float32 attributes / float64 coordinates; parquet cache in `~/.cache/better-mad/`
+  keyed by path+mtime+size+settings.
+- Target: 1–2M rows × several files open. (Measured in v1: 708k first load ≈11 s,
+  cache reload ≈0.05 s, 31 MB RAM/file.)
 
----
+The loader, column registry, and cache are restored from `archive/codebase` (they are
+UI-free and fully tested).
 
-## 7. Export
-- **PNG export** of any plot via HoloViews matplotlib backend (no kaleido/Chromium needed).
-- Selected-points export (CSV; user chooses columns incl. computed ones): **lower priority**,
-  design kept open but implementation deferred within v1 if time-boxed.
+## 7. Preview interactivity
 
----
+The preview must keep the core exploratory interactions:
 
-## 8. Tech stack & architecture
-- Python ≥ 3.11, **uv** for environment/deps, **ruff** (lint/format) + **ty** (types).
-- Core: pandas (float32), HoloViews, Panel (server + widgets), Datashader, xarray
-  (datashader aggregates), numexpr or pandas.eval.
-- Testing: pytest for the data layer (parsing, sentinels, name sanitization, expressions)
-  and config (de)serialization — the parts that are headless-testable.
-- Architecture: **UI-free core** (loading, data model, expressions, filters, plot-config
-  model) separated from the Panel app. The core must be usable headlessly; the web app is
-  a thin layer over it. This keeps packaging, testing, and a future CLI rendering mode sane.
-- CLI: `better-mad [files...]` → starts Panel server on localhost, opens system browser.
-  Port selection (`--port`), headless flag for later batch rendering.
+- **Pan / wheel-zoom / box-zoom / reset** via the standard Bokeh toolbar.
+- **Box & lasso selection** enabled on the toolbar.
+- Vector hover and linked selection beyond the toolbar are **script-side**: the agent or
+  user adds `hv.streams`/`HoverTool` in `plot.py`; AGENTS.md ships recipes.
+- **Datashader is script-side too** (recipes: `rasterize(...)` for >~100k points,
+  mean-of-z aggregation, `cnorm`/clim handling). The skill file encodes the v1 lessons
+  (rasterize aggregates the first vdim, etc.).
 
-## 9. Future work (explicitly out of v1, ordered)
-1. Rose diagram + offset/azimuth workflows (pre-stack files)
-2. Cross-file expressions & joins (join key design needed — CMP? coordinates?)
-3. Line grouping by categorical column (2D data)
-4. Categorical bar charts
-5. Gridding/interpolation for map views
-6. Hover/tap inspection on datashaded layers
-7. AppImage packaging of the CLI
-8. Batch/headless plot rendering from saved configs
+## 8. Agent skills & small-model support
+
+A core bet of v2: with good skills, even a small local model produces good plots.
+
+- `AGENTS.md` in the workspace: SDK reference (copy-pasteable), hard rules (always read
+  `datasets.md`, always end with `bm.show()`), and **recipes** for the seismic staples:
+  colored scatter map (UTM, equal aspect), crossplot, histogram, line/CMP gather,
+  datashader variants, percentile-clipped color scales.
+- Every recipe is a complete runnable script, not pseudocode.
+- Known-gotchas section carries the v1 post-mortems (pandas 3.x parsing, rasterize
+  vdim trap, sizing policies) so models don't rediscover them.
+- `datasets.md` keeps per-column stats so the model can pick sane clims/bins without
+  loading data.
+
+## 9. Tech stack & architecture
+
+- Python ≥ 3.11, **uv**, **ruff** + **ty**.
+- Deps: pandas, pyarrow, holoviews, panel, datashader. (watchdog optional — polling
+  fallback is fine.)
+- **UI-free core** (rule carried over): `better_mad/core` = loading, workspace model,
+  runner, SDK, manifest generation. All headless, all pytest-covered.
+  `better_mad/app` = Panel shell: terminal pane, preview/code center, files panel.
+- CLI: `better-mad [files...]` → workspace + server + browser, as in v1.
+
+## 10. Security model
+
+- Generated scripts run **unsandboxed**, with the user's privileges, on the user's
+  machine — identical to running the agent in a plain terminal. The app does not fetch,
+  exec, or auto-run anything from the network; execution only follows edits to `plot.py`.
+- The trust boundary is the agent harness itself; better-mad stays out of that decision.
+- Documented plainly in README and first-run hint.
+
+## 11. Future work (explicitly not v2, ordered)
+
+1. Multiple scripts / script tabs, script history & diff
+2. Embedded agent SDK chat panel as an alternative to the terminal (same workspace
+   protocol — the design intentionally doesn't block this)
+3. Selection → data workflows: export selected points to CSV, feed selection back to
+   the agent ("plot only these")
+4. Session persistence: files + parser settings + `plot.py` + workspace path
+5. PNG export button (HoloViews matplotlib backend, as planned in v1)
+6. Hover/tap inspection helpers as SDK/recipe extensions
+7. Cross-file joins/expressions (if still needed once the agent can do them in code)
+8. AppImage packaging
+9. Gridding/interpolation for map views (still explicitly out by default)

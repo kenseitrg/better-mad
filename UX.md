@@ -1,154 +1,132 @@
-# better-mad — UX Specification
+# better-mad — UX Specification (v2)
 
-How the user interacts with each feature. Complements `design.md` (what) with the
-interaction model (how).
+How the user interacts with the agent-driven instrument. Complements `design.md`
+(what) with the interaction model (how).
 
 ## Decisions (resolved)
 
 | # | Topic | Decision |
 |---|-------|-----------|
-| 1 | Plot workspace | **Tabs** — one tab per plot, renameable, closable. Grid overview is a stretch goal |
-| 2 | File import | **Auto-load with best-guess defaults + per-file settings panel**. No blocking preview dialog. Revisit if misdetection proves common |
-| 3 | File I/O direction | **Browser-native**: sessions and PNGs leave/enter via browser download/upload, not server-side paths |
-| 4 | Expression naming | **Prompt for a name at commit, pre-filled** with a default (`expr_1`, `expr_2`, …) so throwaway calculations need only Enter |
-| 5 | Screen real estate | Controls (plot options + all layer blocks) live in a fixed-width **right style drawer**; the center holds only the plot, which **resizes responsively** to fill the freed space. Target resolution 1920×1080 |
+| 1 | Left panel | **Embedded terminal** running the user's own agent harness — not a bespoke chat UI |
+| 2 | Center panel | Single pane toggling **Preview ⟷ Code**; both views stay alive so switching is instant |
+| 3 | File I/O | Data import via right-panel picker; everything else stays on disk in the workspace |
+| 4 | Re-run trigger | **Auto-run on file change** (debounced, toggleable) + manual Run button |
+| 5 | Failure handling | Last good plot stays up with a staleness badge; error tail as a banner. No modals |
 
 ---
 
 ## 1. App shell
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ Toolbar: [Add plot] [Save session] [Load session]            │
-├─────────────┬──────────────────────────────┬─────────────────┤
-│ Data sidebar│  Plot workspace (tabs)       │ Style drawer    │
-│ • file 1    │  ┌────────────────────────┐  │ (plot & layer   │
-│   columns…  │  │   active plot          │  │  properties)    │
-│   filters…  │  │                        │  │                 │
-│ • file 2    │  └────────────────────────┘  │                 │
-└─────────────┴──────────────────────────────┴─────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Header: workspace path · [▶ Run] [Auto-run ✓] · ✓ ran 0.8 s ago  │
+├────────────────┬─────────────────────────────┬───────────────────┤
+│                │  [● Preview] [ Code ]       │ Files             │
+│ Agent terminal │  ┌────────────────────────┐ │ ▾ file_a (708k×9) │
+│                │  │                        │ │   XCORD_MIDPT …   │
+│ $ pi           │  │    interactive plot    │ │   TR.DOMFREQ …    │
+│                │  │                        │ │ ▸ file_b …        │
+│                │  └────────────────────────┘ │                   │
+│                │  (or: editor for plot.py)   │ [＋ Add files]    │
+└────────────────┴─────────────────────────────┴───────────────────┘
 ```
 
-- **Left — data sidebar**: loaded files, their columns, filters, expressions.
-- **Center — plot workspace**: tabbed; each tab holds one plot plus a compact inline
-  toolbar (datashader toggle, PNG button, lock-limits).
-- **Right — style drawer**: context panel for the current selection (plot or layer).
-- Both sidebars are **drag-resizable** on their inner edge and collapsible via the
-  header buttons; widths persist per browser (localStorage).
-- Plots render live; there is no "apply"/"redraw" button anywhere in the core flows.
+- All three columns are drag-resizable; widths persist per browser (localStorage),
+  same mechanism as v1 (CSS variables, never inline widths).
+- The header status line always answers: *did my last change make it to the plot?*
+  (running…, ✓ time+rows, ✗ error with one-line reason).
 
-## 2. Loading files
-Entry paths: CLI args (`better-mad file1 file2 …`) and an in-UI "Add files" picker.
+## 2. First launch / empty workspace
 
-- On add, the file is **parsed immediately with best-guess defaults**: delimiter
-  auto-detect (whitespace/comma/tab), decimal separator `.`, default sentinel list.
-- Each file gets an **Import settings panel**: detected delimiter, decimal separator,
-  sentinel list, a preview table (first ~20 rows), and per-column parse status
-  (ok / all-NaN / mixed).
-- Editing any setting exposes a **Re-parse** button; nothing re-loads silently.
-- Wrong parses must be *visible*, never silent: parse status and row/column counts are
-  shown right in the panel.
+1. App opens with an empty workspace directory created and the terminal ready.
+2. Center shows the empty state: "Add files (right), then tell your agent what to plot."
+3. Right panel offers **＋ Add files**.
+4. The terminal prints a one-time hint: *"Run your agent here — AGENTS.md and
+   datasets.md in this directory teach it the SDK and your data."*
 
-## 3. Browsing data
-- Expanding a file in the sidebar shows columns with **original display names** and
-  quick stats: min / max / NaN%.
-- This column list is the single source for all column pickers in the app.
-- Every column selection anywhere is a **searchable dropdown/list** — never a plain
-  `<select>` (files have 20–30 columns).
+## 3. Importing files
 
-## 4. Creating a plot
-1. **Add plot** → new tab.
-2. **Type selector**: scatter / color scatter / polar scatter / histogram / 1D density /
-   2D density / line graph.
-3. **Role slots** appear per type: X, Y, Color, θ, r, Bin column… Each slot is a
-   searchable column picker preceded by a **file selector** (so layers from another file
-   start here).
-4. Plot renders as soon as the minimum roles are filled; every subsequent change is live.
-5. Controls are laid out in **grouped rows** (type/file · role slots · options) — never one
-   wide row — so horizontal scrolling never appears.
-6. Newly added plots are **auto-selected** (their tab becomes active).
+- **＋ Add files** → browser file picker → files parse immediately with best-guess
+  defaults (v1 behavior): delimiter auto-detect, default sentinels, decimal `.`.
+- Each file entry expands to: row/column counts, parse status, and a collapsible
+  **Import settings** block (delimiter, decimal separator, sentinel list, first-20-rows
+  preview, per-column parse status). Editing exposes **Re-parse** — nothing re-loads
+  silently.
+- On success: file appears in the right panel with its columns (display names, min/max,
+  NaN%); `datasets.md` in the workspace is regenerated immediately.
+- Wrong parses must be *visible* (status + counts), never silent.
 
-## 5. Layers
-- Each plot tab contains a **layer list**: visibility checkbox, reorder, duplicate,
-  delete, and the layer's target file.
-- **Add layer** = pick file → plot type → columns.
-- Clicking a layer row opens its properties in the style drawer.
-- Invalid compositions (design §4.2) are prevented by **disabling invalid options** in
-  the UI, not by erroring after the fact.
+## 4. The agent loop (core flow)
 
-## 6. Styling
-The style drawer has two levels, switched by what the user clicked:
-- **Plot properties** (clicked plot chrome): title, axis labels, axis limits, log/linear
-  axes, legend (on/off, position, labels), equal aspect for map views, grid.
-- **Layer properties** (clicked layer row): symbol, size, opacity, colormap, percentile
-  clip (default 2–98%), explicit color min/max, log color scale, datashader toggle,
-  tooltip columns (§10).
+1. User starts their harness in the terminal (`pi`, `claude`, `codex`, local-model CLI…).
+2. User types intent in natural language: *"color-scatter map of TR.DOMFREQ on the
+   midpoints, datashaded, percentile-clipped colors"*.
+3. The harness reads `AGENTS.md`/`datasets.md`, writes `plot.py`.
+4. The watcher fires (debounced ~0.5 s) → runner executes → **preview updates**.
+5. Header shows ✓ run time + rendered points. User inspects with pan/zoom/select.
+6. Refinement goes either way:
+   - *"make the colormap turbo and add a colorbar"* → back to step 3.
+   - Toggle **Code**, tweak a line, save → auto-run → back to **Preview**.
 
-**v1 implementation (M4):** the drawer shows the active plot's collapsed *Plot options*
-card plus one compact block per layer (its own collapsed *Layer style* card) — no
-click-selection switching yet. That is deferred polish; the content is identical.
+## 5. Code view
 
-## 7. Comparison workflow
-Three mechanisms, increasing power:
-1. **Duplicate plot → swap file** (one action in the tab menu) for quick A/B.
-2. **Lock limits**: per-plot toggle freezing the current xlim/ylim/color limits.
-3. **Link group**: plots assigned the same group ID keep axes *and* color scales
-   synchronized live — the concrete implementation of shared scales (design §4.4).
+- Center toggle: **Preview | Code**. The Code tab is a full editor
+  (syntax highlighting, line numbers) bound to `plot.py`.
+- Save: explicit **Ctrl+S** and debounced auto-save on focus loss. Saving triggers a
+  run exactly like an agent edit.
+- **External change policy**: if `plot.py` changes on disk while the editor buffer is
+  clean → reload silently. If the buffer is dirty → banner: *"plot.py changed on disk
+  (agent?). [Reload] [Overwrite]"* — agent output is never silently clobbered, and
+  neither is the user's edit.
+- Run errors are also visible inline: a collapsed **Output** drawer under the editor
+  with the last run's stdout/stderr.
 
-## 8. Datashader
-- Per-layer toggle in layer properties; usable at any dataset size.
-- A vector layer above ~100k points raises a **non-blocking warning banner** on the plot:
-  "Rendering 708k points as vectors — consider Datashader [Enable]". Banners, never
-  modals — the user is not interrupted.
+## 6. Preview behavior
 
-## 9. Filtering
-- Per-file **filter panel** in the data sidebar: pick column →
-  - numeric column: dual-handle range slider,
-  - discrete column (e.g. `STACK_WORD`): checkbox list of values.
-- Active filters render as **removable chips** on the file entry **and** as a badge on
-  every plot using that file ("filtered, 412k/708k rows").
-- Rationale: file-level filters silently affecting distant plots is a classic foot-gun;
-  visibility at the point of consumption is mandatory.
-- Filters compose with AND; "Clear all" per file.
+- Bokeh toolbar on every plot: pan, wheel zoom, box zoom, box select, lasso select,
+  reset, save (Bokeh PNG).
+- The preview pane holds the **last good figure**:
+  - Script fails → figure gains a staleness badge ("⚠ plot.py failed 12:03 — showing
+    last good result"), error tail as a banner with [Open output].
+  - Script runs but calls no `show()` → placeholder "Script ran but produced no figure."
+  - Script times out → kill + "Run timed out after 60 s" banner.
+- Interactions beyond the toolbar (hover, linked selection) are the script's job;
+  the app never strips or overrides tools the script configured.
 
-## 10. Expressions
-- Each file panel has an **expression bar**: text input, function help popover
-  (`log, log10, sqrt, abs, clip, where, normalize, percentile`), and clickable column
-  names that insert their sanitized reference.
-- **Live feedback while typing**: parse errors inline; on valid parse, a mini-preview of
-  the result — row count, NaN count, small histogram — before committing.
-- **Commit prompts for a column name, pre-filled** with `expr_1`, `expr_2`, …; accepting
-  the default is the fast path for throwaway calculations, renaming is available later.
-- Computed columns appear in the file's column list with a marker and a delete action;
-  they are usable everywhere real columns are (plot roles, filters, further expressions).
+## 7. Right panel — files & columns
 
-## 11. Hover
-- Vector layers: hover shows plotted values (x, y, color/z) by default.
-- Layer properties offer a **"tooltip columns" multi-select** for extra attributes.
-  Never dump the full column list (20–30 columns).
-- Datashaded layers have no per-point hover; layer properties state this explicitly
-  ("hover unavailable in Datashader mode") instead of leaving the user to wonder.
+- One card per loaded file: name, rows×cols, parse status; expand → columns with
+  **original display names** and quick stats (min/max/NaN%).
+- Column names are **click-to-copy** (copies the sanitized name scripts must use, with
+  a tooltip showing the mapping). Rationale: the consumer of column names in v2 is a
+  text script, so copy beats a picker.
+- File actions: re-parse settings, reload from disk, close (with confirm if the script
+  references it).
+- Closing a file referenced by `plot.py` doesn't kill anything — the next run fails
+  with a clear `bm.data()` KeyError that the banner surfaces.
 
-## 12. Selection & export (lower priority)
-- Lasso/box select on vector layers → status area shows "N selected".
-- **Export selection** opens a dialog: choose columns (plotted ones pre-selected, computed
-  columns available), CSV via browser download.
-- Selection belongs to one layer at a time in v1.
+## 8. Terminal behavior
 
-## 13. Sessions & PNG export
-- All file I/O is **browser-native**:
-  - Save session / export PNG → **browser downloads**.
-  - Load session → **file upload widget**.
-- Rationale: no server-side path assumptions; the app keeps working if ever pointed at a
-  non-localhost server; matches browser user expectations.
-- Loading a session with missing source files: warning banner lists the missing files;
-  affected plots show a placeholder instead of crashing.
+- The terminal is a real pty + shell; the app spawns no agent itself and has no
+  opinions about the harness. Scrollback, copy/paste, and resize work as in any
+  terminal widget.
+- The app never parses, intercepts, or injects terminal traffic — the only coupling
+  to the agent is the filesystem (§4 of design.md).
+- **Restart shell** action in the panel header for wedged sessions.
 
-## 14. Errors & empty states
-Everything degrades to banners or placeholders — never crashes, rarely modals:
-- Unparsable file → error in the file's import panel, file kept for settings tweaking.
-- Empty filter result → "0 rows after filtering [Clear filters]".
-- NaN-only column plotted → banner on the plot.
-- Session with missing files → per-plot placeholders (§13).
-- **Modals only for destructive confirmations** (e.g. closing a modified plot).
-- First launch / empty workspace: quick-start hints (add a file, add a plot).
+## 9. Errors & empty states
+
+Everything degrades to banners/badges/placeholders — never crashes, never modals
+except destructive confirms:
+
+| Situation | Handling |
+|-----------|----------|
+| Unparsable file | Error in its import block; file kept for settings tweaks |
+| Script error / timeout | Last good plot + staleness badge + error banner |
+| No `show()` call | Center placeholder with hint |
+| Dataset missing at run time | Banner quoting the `bm.data()` KeyError |
+| Agent overwrote dirty editor buffer | Reload/Overwrite banner (§5) |
+| First launch | Quick-start card (§2) |
+
+Modals only for: closing a referenced file, overwriting a dirty `plot.py`,
+deleting the workspace.
