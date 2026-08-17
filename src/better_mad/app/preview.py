@@ -74,6 +74,7 @@ class PreviewApp:
         self._changed_at: float | None = None
         self._ran_mtime: float | None = None
         self._running = False
+        self._pending_run = False  # manual Run clicked while a run was in flight
         self._results: queue.Queue[RunResult] = queue.Queue()
 
         # last good output
@@ -117,6 +118,12 @@ class PreviewApp:
         with contextlib.suppress(queue.Empty):
             self._apply_result(self._results.get_nowait())
 
+        # a manual Run clicked mid-flight fires as soon as the current run lands
+        if not self._running and self._pending_run:
+            self._pending_run = False
+            self.start_run()
+            return
+
         mtime = self.script_mtime()
         now = time.monotonic()
         if mtime != self._seen_mtime:
@@ -135,6 +142,7 @@ class PreviewApp:
 
     def start_run(self) -> None:
         if self._running:
+            self._pending_run = True  # fire once the current run completes
             return
         self._running = True
         self._ran_mtime = self.script_mtime()
@@ -150,6 +158,8 @@ class PreviewApp:
             result = run_script(self.ws, timeout=self.timeout)
         except FileNotFoundError as exc:
             result = RunResult("error", None, 0.0, "", str(exc))
+        except Exception as exc:  # never leave _running stuck True
+            result = RunResult("error", None, 0.0, "", f"runner crashed: {exc!r}")
         self._results.put(result)
 
     # --- result application ---------------------------------------------------

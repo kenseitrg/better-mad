@@ -158,6 +158,46 @@ def test_recovery_clears_banner(tmp_path: Path) -> None:
     assert isinstance(app.figure_pane.object, hv.Curve)
 
 
+def test_manual_run_during_run_is_queued(tmp_path: Path) -> None:
+    """Run clicked mid-flight fires once the current run lands (not dropped)."""
+    app = _app(tmp_path)
+    app._running = True
+    app.manual_run()
+    assert app._pending_run is True
+    calls = 0
+
+    def fake_start() -> None:
+        nonlocal calls
+        calls += 1
+
+    app.start_run = fake_start  # type: ignore
+    app._running = False
+    app.tick()
+    assert calls == 1
+    assert app._pending_run is False
+
+
+def test_worker_exception_does_not_stuck_running(tmp_path: Path, monkeypatch) -> None:
+    """A crashing runner must still produce a result, never wedge _running."""
+    import better_mad.app.preview as preview_mod
+
+    def broken_runner(ws, timeout=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(preview_mod, "run_script", broken_runner)
+    app = _app(tmp_path)
+    app.start_run()
+    deadline = time.monotonic() + 10
+    while app._running and time.monotonic() < deadline:
+        time.sleep(0.05)
+        app.tick()
+    assert not app._running
+    assert "runner crashed" in app.banner.object
+    # and the next run is not blocked
+    app.tick()
+    assert not app._pending_run
+
+
 def test_full_loop_with_real_subprocess(tmp_path: Path) -> None:
     """Watcher-triggered run end to end (worker thread + queue drain)."""
     app = _app(tmp_path)
