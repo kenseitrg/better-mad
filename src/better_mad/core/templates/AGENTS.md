@@ -35,8 +35,11 @@ import better_mad.sdk as bm
 
 df = bm.data("sample")  # see datasets.md
 pts = hv.Points(df, kdims=["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
-bm.show(pts.opts(color="TR_DOMFREQ", cmap="viridis", size=3, width=800, height=600))
+bm.show(pts.opts(color="TR_DOMFREQ", cmap="viridis", size=3))
 ```
+
+**Do not set `width=`/`height=` opts** — the preview sizes the figure to fill its
+container automatically. Fixed sizes render as a small off-center plot.
 
 ## Large data
 
@@ -49,7 +52,7 @@ from holoviews.operation.datashader import rasterize
 
 pts = hv.Points(df, kdims=["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
 img = rasterize(pts, aggregator=ds.count())  # or ds.mean("TR_DOMFREQ") for color-by-z
-bm.show(img.opts(cmap="viridis", width=800, height=600))
+bm.show(img.opts(cmap="viridis"))
 ```
 
 ## Known pitfalls
