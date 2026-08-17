@@ -18,7 +18,7 @@ Core rule (unchanged): **UI-free core first, Panel app is a thin layer on top.**
   prestack, 2D-like) also load cleanly; dropped v1 `computed_columns` field and the
   expression/composition/styles modules per the pivot.
 
-## M1 — Workspace, SDK & runner (headless) (2–3 days)
+## M1 — Workspace, SDK & runner (headless) (2–3 days) ✅ done
 The new engine; fully headless and pytest-covered.
 - Workspace model: create dir, write `AGENTS.md` skill file + `datasets.md` manifest;
   regenerate manifest on dataset changes.
@@ -29,7 +29,9 @@ The new engine; fully headless and pytest-covered.
 - **Tests:** script → figure round-trip; error/timeout paths; missing-dataset KeyError;
   manifest content matches loaded datasets.
 - **Exit:** headless demo: load sample file → run a hand-written `plot.py` → get back
-  a HoloViews Points object.
+  a HoloViews Points object. ✔ 121 MB file loaded → script → `hv.Points` with 708,650
+  points in 0.8 s; 14 new tests (62 total). Skill file + starter script + manifest ship
+  in `core/templates`; R2 (hv pickling) verified across the subprocess boundary.
 
 ## M2 — Preview pane + minimal app (2 days)
 - Panel app: header (Run, auto-run toggle, status line) + center preview only.
@@ -70,8 +72,8 @@ The new engine; fully headless and pytest-covered.
 ## Risks & spikes
 - **R1 Terminal widget** — spike Panel's pty Terminal early (M3 or sooner): spawn,
   resize, scrollback, cwd control. Fallback if inadequate: xterm.js in a custom pane.
-- **R2 HoloViews pickling** across the subprocess boundary — verify in M1 that
-  Overlays/Layouts + datashader hooks survive pickle in the same env.
+- **R2 HoloViews pickling** across the subprocess boundary — ✅ verified in M1:
+  Points/Curve survive pickle round-trip through the runner.
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
 - **R4 Model capability floor** — if small local models fail even with skills,

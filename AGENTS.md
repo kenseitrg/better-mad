@@ -23,8 +23,8 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M0 done, no app code yet**. Next step: milestone **M1** — workspace, SDK &
-  runner (PLAN.md).
+- Phase: **M1 done** — data core, workspace, SDK & runner all headless-green. Next
+  step: milestone **M2** — preview pane + minimal app (PLAN.md).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
