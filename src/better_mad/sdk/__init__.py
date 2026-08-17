@@ -30,6 +30,25 @@ ENV_DATA_DIR = "BETTER_MAD_DATA_DIR"
 ENV_OUTPUT = "BETTER_MAD_OUTPUT"
 
 
+def _ensure_backend() -> None:
+    """Load the bokeh plotting extension so ``.opts()`` works in any script.
+
+    A bare ``import holoviews`` may claim a ``current_backend`` while no plotting
+    module is actually loaded (``loaded_backends()`` empty), in which case applying
+    options raises ``ValueError``. Loading bokeh here means scripts (and small
+    models) never have to remember it.
+    """
+    try:
+        import holoviews as hv
+    except ImportError:
+        return
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+
+
+_ensure_backend()
+
+
 def _data_dir() -> Path:
     raw = os.environ.get(ENV_DATA_DIR)
     if not raw:

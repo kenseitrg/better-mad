@@ -75,6 +75,11 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
   `responsive=True` yields unusable `None` dimensions; set policies via an opts
   `hooks=[...]` callback on `plot.state` (see v1 `fit_container_hook` on
   `archive/codebase`).
+- HoloViews gotcha: a bare `import holoviews` may set `Store.current_backend` while
+  **no plotting module is loaded** (`Store.loaded_backends() == []`) — `.opts()` then
+  raises "No plotting extension is currently loaded". Test `loaded_backends()`, not
+  `current_backend`. In script subprocesses the SDK handles this (`sdk._ensure_backend`);
+  any process that applies opts must call `hv.extension("bokeh")` itself.
 - Panel gotcha: `pn.Tabs.active` starts at 0, so appending the first tab fires **no**
   `active` event — drawer-style watchers must also watch `objects`.
 - Panel gotcha: most widgets default to `width=300, sizing_mode=None`; set

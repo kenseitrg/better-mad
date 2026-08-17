@@ -54,6 +54,8 @@ bm.show(img.opts(cmap="viridis", width=800, height=600))
 
 ## Known pitfalls
 
+- `import better_mad.sdk` already loads the HoloViews bokeh backend — `.opts()`
+  works as-is; do not call `hv.extension()` or `hv.notebook_extension()` yourself.
 - `rasterize(points, column=...)` **silently ignores `column`** for `hv.Points` and
   aggregates the first vdim. To color by the mean of z, shade a dedicated
   `hv.Points(..., vdims=[z])` with `aggregator=ds.mean(z)`.
