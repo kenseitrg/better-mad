@@ -165,7 +165,9 @@ bm.show(pts)  # registers the figure as the preview output
   (pickle, local-only transport). Accepted: `hv.Element`, `Overlay`, `Layout`,
   `NdLayout`. Last `show()` wins. DynamicMaps (e.g. `rasterize()` output) don't
   pickle; the SDK materializes them to their current frame — rasterized previews
-  are therefore static (pan/zoom work, no re-aggregation on zoom).
+  are therefore static (pan/zoom work, no re-aggregation on zoom). Options applied
+  via `.opts()` live in HoloViews' global registry keyed by object id and also
+  don't pickle; the SDK captures them and the runner re-applies them after load.
 - The runner captures **stdout/stderr**, enforces a **timeout** (default 60 s,
   configurable), and returns: figure, run time, stderr tail.
 - On failure: **the last good plot stays up** with a staleness badge; the error tail

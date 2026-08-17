@@ -109,7 +109,31 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
 
 def _load_figure(output_path: str) -> object:
     with open(output_path, "rb") as fh:
-        return pickle.load(fh)  # local transport from our own subprocess
+        payload = pickle.load(fh)  # local transport from our own subprocess
+    if not (isinstance(payload, dict) and "figure" in payload):
+        return payload  # legacy: raw figure
+    _reapply_options(payload["figure"], payload.get("options") or [])
+    return payload["figure"]
+
+
+def _reapply_options(figure: object, options: list[dict[str, dict[str, object]] | None]) -> None:
+    """Restore options captured by ``bm.show()`` (lost in pickle; see sdk docs)."""
+    if not options:
+        return
+    import holoviews as hv
+
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+    items: list[object] = []
+    figure.traverse(lambda x: items.append(x))  # type: ignore
+    for item, entry in zip(items, options, strict=False):
+        if not entry:
+            continue
+        kwargs: dict[str, object] = {}
+        for group in ("plot", "style", "norm"):
+            kwargs.update(entry.get(group) or {})
+        if kwargs:
+            item.opts(**kwargs)  # type: ignore
 
 
 def _decode(data: bytes | None) -> str:

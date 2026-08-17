@@ -109,6 +109,11 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
   output holds local closures) — `bm.show()` materializes them to their current
   frame; previews of rasterized plots are therefore static (no re-aggregation on
   zoom).
+- HoloViews gotcha: **`.opts()` does not survive pickle** — options live in
+  `Store.custom_options` keyed by object id. Any process boundary needs explicit
+  capture (`Store.lookup_options(..., defaults=False)`) + re-apply (`item.opts(**kw)`);
+  the SDK/runner pair does this (`_capture_options`/`_reapply_options`). Symptom if
+  forgotten: script styling silently ignored, plots render with default styles.
 
 ## Commands (fill in as milestones land)
 ```bash

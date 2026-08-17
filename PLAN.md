@@ -57,6 +57,12 @@ The new engine; fully headless and pytest-covered.
   3. **Setting `pane.object` in place while the session document initializes
      renders 0-height figures** (timing race: fast scripts finish before page
      load). Fixed by recreating the HoloViews pane per figure (`_show_figure`).
+- Post-review fix 4 ("colormap edit doesn't update the plot"): `.opts()` lives in
+  HoloViews' global id-keyed registry and silently dies in pickle — the user's
+  first "viridis" was actually the library default. SDK now captures explicit
+  options per element (`_capture_options`, traverse-order aligned) and the runner
+  re-applies them after unpickle. Verified live: viridis → fire switch updates the
+  canvas in-session.
 - Diagnostics note: Panel 1.9 renders pane content inside **Shadow DOM** — page
   scripts must traverse `shadowRoot`s (plain `querySelector` finds nothing).
   R1 (Terminal widget) still open for M3.

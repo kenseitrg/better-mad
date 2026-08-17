@@ -109,16 +109,48 @@ def _materialize(obj: object) -> object:
     return obj
 
 
+def _capture_options(obj: object) -> list[dict[str, dict[str, object]] | None]:
+    """Explicit per-element options, aligned with ``traverse()`` order.
+
+    HoloViews stores ``.opts()`` in a global registry keyed by object id
+    (``Store.custom_options``), so applied options **do not survive pickle**.
+    They are captured here and re-applied by the runner after transport.
+    """
+    try:
+        import holoviews as hv
+    except ImportError:
+        return []
+    backend = hv.Store.current_backend or "bokeh"
+    captured: list[dict[str, dict[str, object]] | None] = []
+
+    def visit(item: object) -> None:
+        entry: dict[str, dict[str, object]] = {}
+        for group in ("plot", "style", "norm"):
+            try:
+                opts = hv.Store.lookup_options(backend, item, group, defaults=False)
+            except Exception:
+                opts = None
+            if opts is not None and opts.kwargs:
+                entry[group] = dict(opts.kwargs)
+        captured.append(entry or None)
+
+    obj.traverse(visit)  # type: ignore
+    return captured
+
+
 def show(obj: object) -> None:
     """Register a figure as the preview output. Last call wins.
 
     Accepts anything picklable; intended for HoloViews ``Element``, ``Overlay``,
     ``Layout`` and ``NdLayout`` objects. DynamicMaps (e.g. ``rasterize()`` output)
-    are materialized to their current frame first. The write is atomic, so a
-    watching app never reads a half-written figure.
+    are materialized to their current frame first, and explicitly applied options
+    are captured alongside the figure (they don't survive pickle on their own).
+    The write is atomic, so a watching app never reads a half-written figure.
     """
+    figure = _materialize(obj)
+    payload = {"figure": figure, "options": _capture_options(figure)}
     out = _output_path()
     tmp = out.with_suffix(".tmp")
     with open(tmp, "wb") as fh:
-        pickle.dump(_materialize(obj), fh)
+        pickle.dump(payload, fh)
     os.replace(tmp, out)
