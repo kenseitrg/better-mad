@@ -14,6 +14,7 @@ import queue
 import threading
 import time
 from datetime import datetime
+from typing import Any
 
 import holoviews as hv
 import panel as pn
@@ -23,6 +24,33 @@ from better_mad.core.workspace import Workspace
 
 DEBOUNCE_S = 0.5
 POLL_MS = 250
+
+
+def _fit_container_hook(plot: Any, _element: object) -> None:
+    """Bokeh sizing-policy hook: make the figure fill its Panel container.
+
+    HoloViews does not expose width_policy/height_policy as opts, so they are set
+    on the bokeh figure at render time (proven approach from the v1 app). Scripts'
+    own width/height opts still serve as initial hints.
+    """
+    fig = plot.state
+    fig.width_policy = "fit"
+    fig.height_policy = "fit"
+
+
+def with_preview_sizing(fig: object) -> object:
+    """Attach the container-fit hook to Element/Overlay figures.
+
+    Layout/NdLayout/GridSpace are passed through unchanged for now (rare in v2
+    scripts; revisit if they appear). Ensures the bokeh backend is loaded first —
+    applying opts without it raises "No plotting extension is currently loaded".
+    """
+    if isinstance(fig, (hv.Element, hv.Overlay)):
+        if "bokeh" not in hv.Store.loaded_backends():
+            hv.extension("bokeh")
+        return fig.opts(hooks=[_fit_container_hook])
+    return fig
+
 
 _PLACEHOLDER_NO_FIGURE = (
     "### Script ran but produced no figure\nFinish the script with `bm.show(fig)` (see AGENTS.md)."
@@ -130,8 +158,9 @@ class PreviewApp:
         self._running = False
         stamp = datetime.now().strftime("%H:%M:%S")
         if result.status == "ok" and result.figure is not None:
-            self._last_good = (result.figure, stamp)
-            self.figure_pane.object = result.figure
+            figure = with_preview_sizing(result.figure)
+            self._last_good = (figure, stamp)
+            self.figure_pane.object = figure
             self._placeholder.visible = False
             self.figure_pane.visible = True
             self._hide_banner()

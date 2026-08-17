@@ -91,11 +91,22 @@ def test_ok_result_renders_figure(tmp_path: Path) -> None:
     app = _app(tmp_path)
     fig = hv.Curve([1, 2, 3])
     app._apply_result(RunResult("ok", fig, 0.8, "", ""))
-    assert app.figure_pane.object is fig
+    assert isinstance(app.figure_pane.object, hv.Curve)
     assert app.figure_pane.visible is True
     assert app.banner.visible is False
     assert "✓" in app.status.object
     assert app._last_good is not None
+
+
+def test_figure_gets_container_fit_hook(tmp_path: Path) -> None:
+    """Rendered figures carry the sizing-policy hook that fills the pane."""
+    from better_mad.app.preview import _fit_container_hook
+
+    app = _app(tmp_path)
+    app._apply_result(RunResult("ok", hv.Curve([1, 2, 3]), 0.5, "", ""))
+    shown = app.figure_pane.object
+    assert isinstance(shown, hv.Curve)
+    assert _fit_container_hook in shown.opts.get().kwargs["hooks"]
 
 
 def test_ok_without_show_gives_placeholder(tmp_path: Path) -> None:
@@ -112,7 +123,7 @@ def test_error_keeps_last_good_and_shows_banner(tmp_path: Path) -> None:
     app._apply_result(RunResult("ok", fig, 0.5, "", ""))
     app._apply_result(RunResult("error", None, 0.2, "", "ValueError: boom"))
     # last good plot stays up
-    assert app.figure_pane.object is fig
+    assert isinstance(app.figure_pane.object, hv.Curve)
     assert app.figure_pane.visible is True
     # staleness note + traceback tail in the banner
     assert app.banner.visible is True
@@ -144,7 +155,7 @@ def test_recovery_clears_banner(tmp_path: Path) -> None:
     fig = hv.Curve([1])
     app._apply_result(RunResult("ok", fig, 0.4, "", ""))
     assert app.banner.visible is False
-    assert app.figure_pane.object is fig
+    assert isinstance(app.figure_pane.object, hv.Curve)
 
 
 def test_full_loop_with_real_subprocess(tmp_path: Path) -> None:
