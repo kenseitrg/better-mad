@@ -201,15 +201,21 @@ class PreviewApp:
         self.status.object = text
 
 
-def make_view(workspace: Workspace) -> pn.Column:
-    """One app session: PreviewApp + periodic watcher + initial run."""
+def make_view(workspace: Workspace) -> pn.template.FastListTemplate:
+    """One app session: PreviewApp + periodic watcher + initial run.
+
+    Served inside a FastListTemplate because bokeh's "fit" sizing policies need
+    a container with a definite height — a bare served Column has none, and the
+    figure collapses (observed: .bk-layer at ~54 px). The template's main area
+    provides it; M3 extends this shell with terminal/files panels.
+    """
     hv.extension("bokeh")
     app = PreviewApp(workspace)
     pn.state.add_periodic_callback(app.tick, POLL_MS)
     app.start_run()  # show whatever plot.py currently holds on open
-    return pn.Column(
-        app.header(),
-        app.center,
-        sizing_mode="stretch_both",
-        margin=10,
+    return pn.template.FastListTemplate(
+        title="better-mad",
+        header=[app.header()],
+        main=[app.center],
+        main_max_width="",
     )
