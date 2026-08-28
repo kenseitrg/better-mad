@@ -33,7 +33,8 @@ class RunResult:
     """Outcome of one ``plot.py`` execution.
 
     Attributes:
-        status: ``ok`` (ran to exit 0), ``error`` (non-zero exit), ``timeout``.
+        status: ``ok`` (ran to exit 0), ``error`` (non-zero exit **or** the
+            figure payload could not be loaded), ``timeout``.
         figure: the last ``bm.show()`` payload, or None if none was shown.
         duration_s: wall-clock seconds of the run.
         stdout: captured standard output.
@@ -51,7 +52,9 @@ def run_script(workspace: Workspace, timeout: float = DEFAULT_TIMEOUT_S) -> RunR
     """Execute the workspace's ``plot.py`` in a subprocess and collect the figure.
 
     Raises ``FileNotFoundError`` if the script does not exist. On timeout the
-    whole process group is killed (scripts may spawn their own children).
+    whole process group is killed (scripts may spawn their own children). An
+    output payload that cannot be unpickled is reported as status ``error``
+    (never raised), so the app can show an explainable banner.
     """
     script = workspace.script_path
     if not script.exists():
@@ -93,7 +96,14 @@ def run_script(workspace: Workspace, timeout: float = DEFAULT_TIMEOUT_S) -> RunR
 
         if proc.returncode != 0:
             return RunResult("error", None, duration, stdout, stderr)
-        figure = _load_figure(output_path) if os.path.exists(output_path) else None
+        figure: object | None = None
+        if os.path.exists(output_path):
+            try:
+                figure = _load_figure(output_path)
+            except Exception as exc:  # e.g. payload referencing script-local callables
+                note = f"better-mad: could not load the figure produced by the script: {exc}"
+                stderr = f"{stderr}\n{note}" if stderr else note
+                return RunResult("error", None, duration, stdout, stderr)
         return RunResult("ok", figure, duration, stdout, stderr)
     finally:
         with contextlib.suppress(FileNotFoundError):

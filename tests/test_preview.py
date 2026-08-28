@@ -109,6 +109,23 @@ def test_figure_gets_container_fit_hook(tmp_path: Path) -> None:
     assert _fit_container_hook in shown.opts.get().kwargs["hooks"]
 
 
+def test_with_preview_sizing_merges_user_hooks() -> None:
+    """The sizing hook must merge with hooks the script set, not replace them."""
+    from better_mad.app.preview import _fit_container_hook, with_preview_sizing
+
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+
+    def user_hook(plot, element):
+        pass
+
+    fig = with_preview_sizing(hv.Curve([1, 2, 3]).opts(hooks=[user_hook]))
+    assert isinstance(fig, hv.Curve)
+    hooks = hv.Store.lookup_options("bokeh", fig, "plot", defaults=False).kwargs["hooks"]
+    assert user_hook in hooks
+    assert _fit_container_hook in hooks
+
+
 def test_ok_without_show_gives_placeholder(tmp_path: Path) -> None:
     app = _app(tmp_path)
     app._apply_result(RunResult("ok", None, 0.3, "", ""))

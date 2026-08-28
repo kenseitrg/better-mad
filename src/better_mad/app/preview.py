@@ -44,11 +44,25 @@ def with_preview_sizing(fig: object) -> object:
     Layout/NdLayout/GridSpace are passed through unchanged for now (rare in v2
     scripts; revisit if they appear). Ensures the bokeh backend is loaded first —
     applying opts without it raises "No plotting extension is currently loaded".
+
+    Existing plot-level ``hooks`` are merged with, not replaced by,
+    ``_fit_container_hook``: hooks defined in an importable module can
+    legitimately reach this point after transport, and a bare
+    ``.opts(hooks=[...])`` would clobber them.
     """
     if isinstance(fig, (hv.Element, hv.Overlay)):
         if "bokeh" not in hv.Store.loaded_backends():
             hv.extension("bokeh")
-        return fig.opts(hooks=[_fit_container_hook])
+        backend = hv.Store.current_backend or "bokeh"
+        hooks: list[Any] = []
+        try:
+            plot_opts = hv.Store.lookup_options(backend, fig, "plot", defaults=False)
+            hooks = list(plot_opts.kwargs.get("hooks") or [])
+        except Exception:
+            hooks = []  # no stored plot options — nothing to merge
+        if _fit_container_hook not in hooks:
+            hooks.append(_fit_container_hook)
+        return fig.opts(hooks=hooks)
     return fig
 
 

@@ -109,12 +109,33 @@ def _materialize(obj: object) -> object:
     return obj
 
 
+def _holds_callable(value: object) -> bool:
+    """True if ``value`` is a callable or a container holding one (recursively).
+
+    Opts like ``hooks`` arrive as lists of functions, so the check must look
+    inside plain containers, not just at the top-level value.
+    """
+    if callable(value):
+        return True
+    if isinstance(value, dict):
+        return any(_holds_callable(v) for v in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_holds_callable(v) for v in value)
+    return False
+
+
 def _capture_options(obj: object) -> list[dict[str, dict[str, object]] | None]:
     """Explicit per-element options, aligned with ``traverse()`` order.
 
     HoloViews stores ``.opts()`` in a global registry keyed by object id
     (``Store.custom_options``), so applied options **do not survive pickle**.
     They are captured here and re-applied by the runner after transport.
+
+    Callable-valued opts (e.g. ``hooks``) are dropped — they cannot cross the
+    process boundary when defined in the script: such a function pickles by
+    reference in this process, but the app-side load fails to resolve it, and
+    one such kwarg would sink the whole payload. Such opts simply don't
+    transport.
     """
     try:
         import holoviews as hv
@@ -131,7 +152,9 @@ def _capture_options(obj: object) -> list[dict[str, dict[str, object]] | None]:
             except Exception:
                 opts = None
             if opts is not None and opts.kwargs:
-                entry[group] = dict(opts.kwargs)
+                kept = {k: v for k, v in opts.kwargs.items() if not _holds_callable(v)}
+                if kept:
+                    entry[group] = kept
         captured.append(entry or None)
 
     obj.traverse(visit)  # type: ignore
@@ -144,8 +167,10 @@ def show(obj: object) -> None:
     Accepts anything picklable; intended for HoloViews ``Element``, ``Overlay``,
     ``Layout`` and ``NdLayout`` objects. DynamicMaps (e.g. ``rasterize()`` output)
     are materialized to their current frame first, and explicitly applied options
-    are captured alongside the figure (they don't survive pickle on their own).
-    The write is atomic, so a watching app never reads a half-written figure.
+    are captured alongside the figure (they don't survive pickle on their own);
+    callable-valued opts such as ``hooks`` are dropped at capture (see
+    ``_capture_options``). The write is atomic, so a watching app never reads a
+    half-written figure.
     """
     figure = _materialize(obj)
     payload = {"figure": figure, "options": _capture_options(figure)}
