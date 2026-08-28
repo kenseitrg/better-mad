@@ -69,4 +69,6 @@ bm.show(img.opts(cmap="viridis"))
 - Coordinates like `XCORD_MIDPT`/`YCORD_MIDPT` are UTM-ish and irregular — scatter,
   not surface: no gridding/interpolation.
 - 0 is always a real data value, never a null.
-- Map views want equal aspect: `.opts(aspect="equal")`.
+- The preview toolbar ships pan, wheel zoom, box zoom, box+lasso select, reset, and
+  save by default. Set `tools=` explicitly only if you need different tools — the
+  app never overrides script-configured tools.

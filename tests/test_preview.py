@@ -126,6 +126,57 @@ def test_with_preview_sizing_merges_user_hooks() -> None:
     assert _fit_container_hook in hooks
 
 
+def test_default_figure_gets_selection_tools_and_pan_active() -> None:
+    """Figures without script-configured tools ship the standard preview toolbar
+    (UX.md §6) — box/lasso select included — with pan kept as the active drag."""
+    from bokeh.models import PanTool
+
+    from better_mad.app.preview import with_preview_sizing
+
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+
+    model = hv.render(with_preview_sizing(hv.Points([(1, 2), (3, 4)])))
+    names = [t.__class__.__name__ for t in model.toolbar.tools]
+    assert "BoxSelectTool" in names
+    assert "LassoSelectTool" in names
+    assert isinstance(model.toolbar.active_drag, PanTool)
+
+
+def test_with_preview_sizing_keeps_script_tools() -> None:
+    """Script-configured tools are never replaced by the default list."""
+    from better_mad.app.preview import _fit_container_hook, with_preview_sizing
+
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+
+    fig = with_preview_sizing(hv.Points([(1, 2), (3, 4)]).opts(tools=["hover"]))
+    plot_opts = hv.Store.lookup_options("bokeh", fig, "plot", defaults=False).kwargs
+    assert plot_opts["tools"] == ["hover"]
+    assert _fit_container_hook in plot_opts["hooks"]
+
+
+def test_overlay_children_get_default_tools() -> None:
+    """Overlays ship the standard toolbar too (applied per leaf element, since an
+    overlay's toolbar is the union of its children's), while leaves the script
+    configured keep their own tools."""
+    from bokeh.models import PanTool
+
+    from better_mad.app.preview import with_preview_sizing
+
+    if "bokeh" not in hv.Store.loaded_backends():
+        hv.extension("bokeh")
+
+    model = hv.render(
+        with_preview_sizing(hv.Points([(1, 2)]).opts(tools=["hover"]) * hv.Curve([(1, 2), (3, 4)]))
+    )
+    names = [t.__class__.__name__ for t in model.toolbar.tools]
+    assert "HoverTool" in names
+    assert "BoxSelectTool" in names
+    assert "LassoSelectTool" in names
+    assert isinstance(model.toolbar.active_drag, PanTool)
+
+
 def test_ok_without_show_gives_placeholder(tmp_path: Path) -> None:
     app = _app(tmp_path)
     app._apply_result(RunResult("ok", None, 0.3, "", ""))

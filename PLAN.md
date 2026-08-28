@@ -79,6 +79,24 @@ The new engine; fully headless and pytest-covered.
   handlers). Verified live: good → bad cmap → fixed recovers with last-good retention.
 - Diagnostics note: Panel 1.9 renders pane content inside **Shadow DOM** — page
   scripts must traverse `shadowRoot`s (plain `querySelector` finds nothing).
+- Post-audit fixes (2026-08-28, pre-M3 review — three issues found by re-auditing
+  M0–M2; all gates re-verified: tests/ruff/ty green, app boots):
+  1. Reopening a workspace (`--workspace`) rehydrates `Workspace.datasets` from
+     `.data/` instead of wiping `datasets.md` while the snapshots still serve
+     scripts. `add_file` writes a `.json` sidecar (source path + ParserSettings)
+     per snapshot; corrupt snapshots degrade to skipped, broken sidecars to
+     fallbacks. design.md §4.2 ledger updated.
+  2. Script-local `.opts(hooks=[fn])` no longer breaks the figure transport
+     (function pickles by reference → app-side unpickle raised AttributeError that
+     escaped `run_script`). Callable-valued opts are dropped at capture, an
+     unloadable payload becomes an error `RunResult` (never an escaping
+     exception), and the preview sizing hook merges with script hooks instead of
+     replacing them.
+  3. Default preview toolbar now carries box/lasso select (UX §6) with pan pinned
+     as the active drag; script-configured `tools`/`default_tools` are never
+     overridden. Gotchas found: HoloViews prepends its own `default_tools` (must
+     be cleared or every tool appears twice), and overlay-level `tools` opts are
+     inert (an overlay's toolbar is the union of its children's — apply per leaf).
   R1 (Terminal widget) still open for M3.
 
 ## M3 — Full shell: terminal, editor, files panel (3–4 days)

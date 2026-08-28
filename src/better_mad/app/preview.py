@@ -18,6 +18,7 @@ from typing import Any
 
 import holoviews as hv
 import panel as pn
+from bokeh.models import PanTool
 
 from better_mad.core.runner import DEFAULT_TIMEOUT_S, RunResult, run_script
 from better_mad.core.workspace import Workspace
@@ -25,21 +26,52 @@ from better_mad.core.workspace import Workspace
 DEBOUNCE_S = 0.5
 POLL_MS = 250
 
+#: Toolbar applied to figures that did not configure tools themselves (UX.md §6).
+#: ``default_tools`` is cleared wherever this is applied — HoloViews would prepend
+#: its own defaults, leaving every tool in the toolbar twice.
+DEFAULT_TOOLS = ["pan", "wheel_zoom", "box_zoom", "box_select", "lasso_select", "reset", "save"]
+
 
 def _fit_container_hook(plot: Any, _element: object) -> None:
-    """Bokeh sizing-policy hook: make the figure fill its Panel container.
+    """Bokeh render hook: fit the figure to its Panel container, keep pan the drag.
 
     HoloViews does not expose width_policy/height_policy as opts, so they are set
     on the bokeh figure at render time (proven approach from the v1 app). Scripts'
     own width/height opts still serve as initial hints.
+
+    Drag pinning: an unresolved ``active_drag="auto"`` resolves to the first drag
+    tool in bokehjs — ambiguous now that the default toolbar carries box/lasso
+    select (overlay toolbars in particular stay at "auto"; HoloViews cannot
+    resolve them). Pan stays the default drag (UX.md §6), so "auto" is pinned to
+    the PanTool when one exists. Explicit choices (a tool instance or ``None``,
+    from a script's ``active_tools`` opt or its own hook) are never overridden.
     """
     fig = plot.state
     fig.width_policy = "fit"
     fig.height_policy = "fit"
+    toolbar = fig.toolbar
+    if toolbar.active_drag == "auto":
+        pan = next((t for t in toolbar.tools if isinstance(t, PanTool)), None)
+        if pan is not None:
+            toolbar.active_drag = pan
+
+
+def _script_set_tools(item: object, backend: str) -> bool:
+    """Whether the script explicitly configured the toolbar of ``item``.
+
+    ``default_tools`` counts too: clearing the defaults (``default_tools=[]``) is
+    as much a toolbar configuration as listing ``tools`` (UX.md §6: the app never
+    overrides tools the script configured).
+    """
+    try:
+        kwargs = hv.Store.lookup_options(backend, item, "plot", defaults=False).kwargs
+    except Exception:
+        return False
+    return "tools" in kwargs or "default_tools" in kwargs
 
 
 def with_preview_sizing(fig: object) -> object:
-    """Attach the container-fit hook to Element/Overlay figures.
+    """Attach the container-fit hook and default toolbar to Element/Overlay figures.
 
     Layout/NdLayout/GridSpace are passed through unchanged for now (rare in v2
     scripts; revisit if they appear). Ensures the bokeh backend is loaded first —
@@ -49,6 +81,12 @@ def with_preview_sizing(fig: object) -> object:
     ``_fit_container_hook``: hooks defined in an importable module can
     legitimately reach this point after transport, and a bare
     ``.opts(hooks=[...])`` would clobber them.
+
+    Figures without script-configured ``tools``/``default_tools`` get the standard
+    preview toolbar (``DEFAULT_TOOLS``, UX.md §6) in the same ``.opts()`` call.
+    On overlays that opt is inert (an overlay's toolbar is the union of its
+    children's), so the tools are applied to each leaf element instead, skipping
+    leaves the script configured.
     """
     if isinstance(fig, (hv.Element, hv.Overlay)):
         if "bokeh" not in hv.Store.loaded_backends():
@@ -62,7 +100,16 @@ def with_preview_sizing(fig: object) -> object:
             hooks = []  # no stored plot options — nothing to merge
         if _fit_container_hook not in hooks:
             hooks.append(_fit_container_hook)
-        return fig.opts(hooks=hooks)
+        opts: dict[str, Any] = {"hooks": hooks}
+        if not _script_set_tools(fig, backend):
+            if isinstance(fig, hv.Element):
+                opts["tools"] = list(DEFAULT_TOOLS)
+                opts["default_tools"] = []
+            else:
+                for child in fig.traverse(lambda x: x, [hv.Element]):
+                    if not _script_set_tools(child, backend):
+                        child.opts(tools=list(DEFAULT_TOOLS), default_tools=[])
+        return fig.opts(**opts)
     return fig
 
 
