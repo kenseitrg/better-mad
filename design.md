@@ -73,7 +73,9 @@ The app owns a **workspace directory** (created per session; path shown in heade
 workspace/
 ├── AGENTS.md        # skill file: SDK reference, conventions, recipes, pitfalls
 ├── datasets.md      # auto-generated manifest of loaded data (names, columns, stats)
-└── plot.py          # the one active plotting script (agent- and user-edited)
+├── plot.py          # the one active plotting script (agent- and user-edited)
+└── .data/           # per-dataset parquet snapshots + .json sidecars (source path,
+                     # parser settings) so a reopened workspace can rehydrate
 ```
 
 - The terminal starts with cwd = workspace, so any harness picks up `AGENTS.md`
@@ -136,7 +138,7 @@ Who touches which workspace file, and when:
 | `AGENTS.md` | app at workspace creation (never overwritten) | agent harness (per its conventions) | static within a version |
 | `datasets.md` | app, on every import/re-parse | agent harness, user | fully regenerated each time |
 | `plot.py` | agent harness; user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
-| `.data/NAME.parquet` | app, on import | SDK `bm.data()` in the subprocess | one per open dataset |
+| `.data/NAME.parquet` (+ `.json` sidecar) | app, on import | SDK `bm.data()` reads the parquet in the subprocess; app reads the sidecar on workspace reopen (rehydration) | one per open dataset |
 | output pickle (temp) | SDK `bm.show()` | runner (unpickles), deleted after | one per run |
 
 Note the asymmetry that keeps the design simple: the app only ever writes *data and

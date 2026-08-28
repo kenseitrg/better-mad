@@ -6,7 +6,8 @@ The workspace directory is the **only** coupling between better-mad and the agen
     ├── AGENTS.md      # skill file for the agent harness (SDK reference, rules)
     ├── datasets.md    # auto-generated manifest of loaded datasets
     ├── plot.py        # the active plotting script (agent- and user-edited)
-    └── .data/         # per-dataset parquet snapshots consumed by better_mad.sdk
+    └── .data/         # per-dataset parquet snapshots + .json sidecars (source path,
+                        # parser settings), consumed by better_mad.sdk
 
 The app watches ``plot.py`` and re-runs it (see :mod:`better_mad.core.runner`);
 agent harnesses discover the SDK by reading ``AGENTS.md``. Nothing here touches the UI.
@@ -14,7 +15,9 @@ agent harnesses discover the SDK by reading ``AGENTS.md``. Nothing here touches 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import time
+from dataclasses import asdict, dataclass, field
 from importlib import resources
 from pathlib import Path
 
@@ -58,6 +61,35 @@ def _skill_template() -> str:
     return resources.files("better_mad.core.templates").joinpath("AGENTS.md").read_text()
 
 
+def _dump_sidecar(ds: Dataset) -> str:
+    """Serialize a dataset's source path and parser settings to sidecar JSON text."""
+    payload = {"source": str(ds.path.resolve()), "settings": asdict(ds.settings)}
+    return json.dumps(payload, indent=2)
+
+
+def _load_sidecar(sidecar: Path, fallback_path: Path) -> tuple[Path, ParserSettings]:
+    """Read a sidecar written by :func:`_dump_sidecar`.
+
+    A missing or unparseable sidecar degrades to ``fallback_path`` with default
+    settings; never raises (errors degrade, they don't crash the open).
+    """
+    try:
+        data = json.loads(sidecar.read_text())
+        raw = data["settings"]
+        settings = ParserSettings(
+            delimiter=raw["delimiter"],
+            decimal=raw["decimal"],
+            sentinels=tuple(raw["sentinels"]),
+            comment=raw["comment"],
+            float64_columns=(
+                tuple(raw["float64_columns"]) if raw["float64_columns"] is not None else None
+            ),
+        )
+        return Path(data["source"]), settings
+    except Exception:  # missing file, bad JSON or wrong shape -> fall back
+        return fallback_path, ParserSettings()
+
+
 @dataclass
 class Workspace:
     """A plotting workspace on disk.
@@ -88,7 +120,7 @@ class Workspace:
         return self.path / DATA_DIR_NAME
 
     def add_file(self, path: str | Path, settings: ParserSettings | None = None) -> Dataset:
-        """Load a file into the workspace: parse, snapshot to parquet, refresh manifest.
+        """Load a file into the workspace: parse, snapshot to parquet + sidecar, refresh manifest.
 
         The dataset name is the file stem; on collision a numeric suffix is added.
         Raises ``LoaderError`` on unparsable input (nothing is registered).
@@ -101,6 +133,7 @@ class Workspace:
             n += 1
         ds.name = name
         ds.df.to_parquet(self.data_dir / f"{name}.parquet")
+        (self.data_dir / f"{name}.json").write_text(_dump_sidecar(ds))
         self.datasets[name] = ds
         self.refresh_manifest()
         return ds
@@ -113,18 +146,47 @@ def create_workspace(path: str | Path) -> Workspace:
     """Create (or open) a workspace directory.
 
     Writes the skill file, starter script and manifest where missing; never
-    overwrites existing files, so user/agent edits survive re-open.
+    overwrites existing files, so user/agent edits survive re-open. Datasets
+    found in ``.data`` are rehydrated so the manifest reflects the snapshots
+    that ``better_mad.sdk`` serves.
     """
     root = Path(path)
     ws = Workspace(path=root)
     root.mkdir(parents=True, exist_ok=True)
     ws.data_dir.mkdir(exist_ok=True)
+    _rehydrate_datasets(ws)
     if not ws.skill_path.exists():
         ws.skill_path.write_text(_skill_template())
     if not ws.script_path.exists():
         ws.script_path.write_text(STARTER_SCRIPT)
     ws.refresh_manifest()
     return ws
+
+
+def _rehydrate_datasets(ws: Workspace) -> None:
+    """Populate ``ws.datasets`` from the ``.data`` parquet snapshots.
+
+    Source path and parser settings come from the ``.json`` sidecar when readable,
+    else fall back to the snapshot path + default settings. A corrupt snapshot is
+    skipped (errors degrade, never crash); orphan sidecars without a parquet are
+    ignored by the glob.
+    """
+    for pq_file in sorted(ws.data_dir.glob("*.parquet")):
+        name = pq_file.stem
+        t0 = time.perf_counter()
+        try:
+            df = pd.read_parquet(pq_file)
+        except Exception:  # corrupt/unreadable snapshot -> skip this dataset
+            continue
+        source, settings = _load_sidecar(pq_file.with_suffix(".json"), fallback_path=pq_file)
+        ws.datasets[name] = Dataset(
+            name=name,
+            path=source,
+            df=df,
+            settings=settings,
+            load_time_s=time.perf_counter() - t0,
+            from_cache=True,
+        )
 
 
 def render_manifest(datasets: dict[str, Dataset]) -> str:
