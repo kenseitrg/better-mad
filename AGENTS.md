@@ -2,8 +2,8 @@
 
 ## What this project is
 **better-mad** — an LLM-agent-driven instrument for visualizing seismic attributes from
-large tabular text files (1–2M rows). Users load data, describe plots to an agent
-running in an embedded terminal, and get back an editable plotting script plus a live
+large tabular text files (1–2M rows). Users load data, describe plots to an embedded
+pi agent chat, and get back an editable plotting script plus a live
 interactive preview (HoloViews + Panel + Datashader) served as a localhost web app.
 
 ## Read these first, in order
@@ -24,15 +24,18 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
 - Phase: **M2 done** — headless engine + minimal preview app live. Next step:
-  milestone **M3** — full shell: terminal, editor, files panel (PLAN.md).
+  milestone **M3** — full shell: pi chat panel, editor, files panel (PLAN.md;
+  re-scoped 2026-11-02 from pty terminal to embedded pi chat).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
 - Product direction: **instrument, not omnibus** — programmable surface (agent +
   editable code) instead of menus for every plot type.
-- Agent integration: **embedded pty terminal**, harness-agnostic. The app spawns no
-  agent and never parses terminal traffic; coupling is **filesystem-only**
-  (agent edits `plot.py`, app watches and re-runs).
+- Agent integration: **embedded pi chat panel** — a Node sidecar process hosts a pi
+  SDK `AgentSession` (cwd = workspace) and serves pwb's SSE/HTTP chat contract; the
+  app renders it with `pn.chat`. Coupling remains **filesystem-only** (agent edits
+  `plot.py`, app watches and re-runs). The app spawns no pty and never parses agent
+  traffic beyond chat display events. Reference implementation: `~/pwb`.
 - Stack: **HoloViews + Panel + Datashader**, pandas; uv + ruff + ty.
 - Execution: agent/user scripts run in a **subprocess** via the `better_mad.sdk`
   transport (`show()` pickles the figure to an app-provided path). Never in-process.
@@ -60,6 +63,7 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
 
 ## Working conventions
 - Python ≥3.11 (system has 3.14), manage with `uv`; lint/format `ruff`, types `ty`.
+  **Node ≥20** required for the chat sidecar (M3+); TypeScript in `sidecar/`.
 - float32 for attribute columns, float64 for coordinates; parquet cache in
   `~/.cache/better-mad/` (design §6).
 - When a discussion changes a decision or adds one: update `design.md`/`UX.md` in the

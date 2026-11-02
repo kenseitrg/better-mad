@@ -7,11 +7,12 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 | # | Topic | Decision |
 |---|-------|-----------|
-| 1 | Left panel | **Embedded terminal** running the user's own agent harness — not a bespoke chat UI |
+| 1 | Left panel | **Embedded chat panel** with the pi agent (Node sidecar, design §9.1) — replaces the originally-planned pty terminal (2026-11-02) |
 | 2 | Center panel | Single pane toggling **Preview ⟷ Code**; both views stay alive so switching is instant |
 | 3 | File I/O | Data import via right-panel picker; everything else stays on disk in the workspace |
 | 4 | Re-run trigger | **Auto-run on file change** (debounced, toggleable) + manual Run button |
 | 5 | Failure handling | Last good plot stays up with a staleness badge; error tail as a banner. No modals |
+| 6 | Chat turns | One in-flight turn; **Stop** aborts; **New chat** rotates the session (old history stays on disk). Agent actions surface as compact tool notes, never raw protocol noise |
 
 ---
 
@@ -22,12 +23,13 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 │ Header: workspace path · [▶ Run] [Auto-run ✓] · ✓ ran 0.8 s ago  │
 ├────────────────┬─────────────────────────────┬───────────────────┤
 │                │  [● Preview] [ Code ]       │ Files             │
-│ Agent terminal │  ┌────────────────────────┐ │ ▾ file_a (708k×9) │
+│ Agent chat     │  ┌────────────────────────┐ │ ▾ file_a (708k×9) │
 │                │  │                        │ │   XCORD_MIDPT …   │
-│ $ pi           │  │    interactive plot    │ │   TR.DOMFREQ …    │
-│                │  │                        │ │ ▸ file_b …        │
-│                │  └────────────────────────┘ │                   │
-│                │  (or: editor for plot.py)   │ [＋ Add files]    │
+│ ▸ user: color  │  │    interactive plot    │ │   TR.DOMFREQ …    │
+│ ◂ agent: done, │  │                        │ │ ▸ file_b …        │
+│   wrote plot.py│  └────────────────────────┘ │                   │
+│ ⚙ edit plot.py │  (or: editor for plot.py)   │ [＋ Add files]    │
+│ [input…][Send] │       [■ Stop] [New chat]   │                   │
 └────────────────┴─────────────────────────────┴───────────────────┘
 ```
 
@@ -38,11 +40,12 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 ## 2. First launch / empty workspace
 
-1. App opens with an empty workspace directory created and the terminal ready.
-2. Center shows the empty state: "Add files (right), then tell your agent what to plot."
+1. App opens with an empty workspace directory created and the chat panel ready
+   (input enabled once the sidecar reports healthy; otherwise a reconnect banner).
+2. Center shows the empty state: "Add files (right), then tell the agent what to plot."
 3. Right panel offers **＋ Add files**.
-4. The terminal prints a one-time hint: *"Run your agent here — AGENTS.md and
-   datasets.md in this directory teach it the SDK and your data."*
+4. The chat panel greets with a one-time hint: *"AGENTS.md and datasets.md in this
+   directory teach me the SDK and your data."*
 
 ## 3. Importing files
 
@@ -58,14 +61,15 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 ## 4. The agent loop (core flow)
 
-1. User starts their harness in the terminal (`pi`, `claude`, `codex`, local-model CLI…).
-2. User types intent in natural language: *"color-scatter map of TR.DOMFREQ on the
+1. User types intent in the chat panel: *"color-scatter map of TR.DOMFREQ on the
    midpoints, datashaded, percentile-clipped colors"*.
-3. The harness reads `AGENTS.md`/`datasets.md`, writes `plot.py`.
-4. The watcher fires (debounced ~0.5 s) → runner executes → **preview updates**.
-5. Header shows ✓ run time + rendered points. User inspects with pan/zoom/select.
-6. Refinement goes either way:
-   - *"make the colormap turbo and add a colorbar"* → back to step 3.
+2. The agent session (sidecar) already has AGENTS.md as context; it reads
+   `datasets.md`, writes `plot.py`. Tool calls surface as compact notes
+   ("⚙ edit plot.py…") while it works.
+3. The watcher fires (debounced ~0.5 s) → runner executes → **preview updates**.
+4. Header shows ✓ run time + rendered points. User inspects with pan/zoom/select.
+5. Refinement goes either way:
+   - *"make the colormap turbo and add a colorbar"* → back to step 2.
    - Toggle **Code**, tweak a line, save → auto-run → back to **Preview**.
 
 ## 5. Code view
@@ -105,14 +109,21 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 - Closing a file referenced by `plot.py` doesn't kill anything — the next run fails
   with a clear `bm.data()` KeyError that the banner surfaces.
 
-## 8. Terminal behavior
+## 8. Chat behavior
 
-- The terminal is a real pty + shell; the app spawns no agent itself and has no
-  opinions about the harness. Scrollback, copy/paste, and resize work as in any
-  terminal widget.
-- The app never parses, intercepts, or injects terminal traffic — the only coupling
-  to the agent is the filesystem (§4 of design.md).
-- **Restart shell** action in the panel header for wedged sessions.
+- The chat pane streams assistant replies token-by-token; agent tool calls render as
+  one-line notes ("⚙ editing plot.py…") so the user sees progress without protocol noise.
+- **One in-flight turn**: the input is disabled while the agent works; **Stop** aborts
+  the turn and leaves a calm "Stopped." marker; the partial reply stays visible.
+- **New chat** rotates to a fresh session file (old transcript stays on disk);
+  refused while a turn is in flight.
+- Chat history persists per workspace and replays after app restart / tab reload.
+- The app never intercepts or rewrites agent actions — the only coupling to the agent
+  is the filesystem (design §4). The transport carries text and telemetry for display.
+- If the sidecar is down: chat pane shows a reconnect banner with a retry; preview,
+  code editor, and files panel keep working (they never depend on the agent).
+- The resolved model id is shown in the chat header; changing models is a CLI flag
+  (`--model provider/model`) in v2 — no in-app model picker.
 
 ## 9. Errors & empty states
 
@@ -126,6 +137,8 @@ except destructive confirms:
 | No `show()` call | Center placeholder with hint |
 | Dataset missing at run time | Banner quoting the `bm.data()` KeyError |
 | Agent overwrote dirty editor buffer | Reload/Overwrite banner (§5) |
+| Chat sidecar down / crashed | Banner in chat pane with retry; preview/editor/files unaffected |
+| Agent turn hung | Watchdog aborts after 5 min; "Stopped." marker; input re-enabled |
 | First launch | Quick-start card (§2) |
 
 Modals only for: closing a referenced file, overwriting a dirty `plot.py`,

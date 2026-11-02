@@ -14,7 +14,7 @@ the `archive/codebase` branch.
 | # | Topic | Decision |
 |---|-------|----------|
 | 1 | Product direction | **Instrument, not omnibus**: no attempt to menu-ify every plot type. Users get a programmable surface (agent + editable code) they can tailor |
-| 2 | Agent integration | **Embedded terminal** (pty) in the left panel. Harness-agnostic: the user runs their preferred agent CLI (pi, claude-code, codex, aider, local-model CLI…). No SDK/chat embedding in v2 |
+| 2 | Agent integration | **Embedded chat panel** (left pane) driven by the pi SDK inside a **Node sidecar process** spawned by the app (the pwb pattern: SSE/HTTP chat transport over a persistent `AgentSession`). Models resolve from the user's existing `~/.pi/agent` providers — no new API keys. **2026-11-02 update:** replaces the original v2 decision (embedded pty terminal, any harness); the pty terminal moves to future work (§11). External harnesses still work from a normal terminal — coupling stays filesystem-only |
 | 3 | Agent ↔ app protocol | **Filesystem**. The agent edits the plot script; the app watches the file and re-runs it. No sockets, no proprietary protocol |
 | 4 | Plotting stack | **HoloViews + Panel + Datashader** (carried over from v1; handles 1–2M-row files natively) |
 | 5 | Code execution | **Subprocess runner** with a small SDK (`show()` transport). Generated code never executes inside the app/server process |
@@ -48,18 +48,20 @@ import files → describe intent to the agent → agent writes plot.py
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ Header: workspace · [Run] [Auto-run ✓] · run status              │
+│ Header: workspace · [Run] [Auto-run ✓] · run status · model       │
 ├────────────────┬─────────────────────────────┬───────────────────┤
-│ Agent terminal │  Center                     │ Files             │
-│ (any CLI       │  [Preview | Code] toggle    │ ▸ file_a 708k rows│
-│  harness,      │  • live interactive plot    │   columns + stats │
-│  user's choice)│  • or editable plot.py      │ ▸ file_b …        │
-│                │                             │ [Add files…]      │
+│ Agent chat     │  [Preview | Code] toggle    │ Files             │
+│ (pi, streamed  │  • live interactive plot    │ ▸ file_a 708k rows│
+│  replies +     │  • or editable plot.py      │   columns + stats │
+│  tool notes;   │                             │ ▸ file_b …        │
+│  Stop / New)   │                             │ [Add files…]      │
 └────────────────┴─────────────────────────────┴───────────────────┘
 ```
 
-- **Left — terminal**: pty-backed terminal widget; the app spawns a shell there, the
-  user launches whatever agent harness they like. cwd is the workspace directory.
+- **Left — chat**: chat UI over the pi agent session hosted by the Node sidecar
+  (§9.1). The agent edits `plot.py` with its built-in file tools; replies stream in
+  with tool notes ("⚙ editing plot.py…"). One in-flight turn at a time; Stop button
+  aborts, New-chat rotates the session. History persists per workspace.
 - **Center — preview/code**: the rendered figure (HoloViews pane) or a code editor bound
   to `plot.py`. Toggle is instant; both stay alive.
 - **Right — files**: open datasets with columns (original display names + sanitized
@@ -74,12 +76,16 @@ workspace/
 ├── AGENTS.md        # skill file: SDK reference, conventions, recipes, pitfalls
 ├── datasets.md      # auto-generated manifest of loaded data (names, columns, stats)
 ├── plot.py          # the one active plotting script (agent- and user-edited)
-└── .data/           # per-dataset parquet snapshots + .json sidecars (source path,
+├── .data/           # per-dataset parquet snapshots + .json sidecars (source path,
                      # parser settings) so a reopened workspace can rehydrate
+└── .chat/           # sidecar-hosted pi session files (JSONL) — chat history survives
+                     # app restarts and workspace reopenings
 ```
 
-- The terminal starts with cwd = workspace, so any harness picks up `AGENTS.md`
-  according to its own conventions — no per-harness integration needed.
+- The agent session runs with **cwd = workspace**; pi natively loads `AGENTS.md` from
+  its cwd as a context file, so the skill material reaches the model with no extra
+  plumbing. An external harness opened in a terminal at the workspace works the same
+  way — no per-harness integration needed.
 - `datasets.md` is regenerated on every import/re-parse: file names, row counts,
   original + sanitized column names, dtype, min/max/NaN%. This is what lets a small
   model know the data without reading 121 MB files.
@@ -92,7 +98,7 @@ workspace/
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant H as Agent harness<br/>(embedded terminal)
+    participant H as pi agent<br/>(chat panel via sidecar)
     participant A as App<br/>(watcher + runner)
     participant S as plot.py subprocess<br/>(better_mad.sdk)
 
@@ -107,8 +113,8 @@ sequenceDiagram
     A --) A: rewrite datasets.md (columns, stats)
 
     Note over U,S: 3 · Agent loop
-    U ->> H: start harness; describe the plot
-    H ->> H: read AGENTS.md + datasets.md
+    U ->> H: type intent in the chat panel
+    H ->> H: AGENTS.md (context file) + datasets.md
     H --) A: write plot.py
     A ->> A: watcher: debounce + stability check
     A ->> S: spawn python plot.py<br/>env: BETTER_MAD_DATA_DIR, BETTER_MAD_OUTPUT
@@ -135,15 +141,18 @@ Who touches which workspace file, and when:
 
 | File | Written by | Read by | Lifecycle |
 |------|-----------|---------|-----------|
-| `AGENTS.md` | app at workspace creation (never overwritten) | agent harness (per its conventions) | static within a version |
+| `AGENTS.md` | app at workspace creation (never overwritten) | pi agent session (pi context-file convention); any external harness | static within a version |
 | `datasets.md` | app, on every import/re-parse | agent harness, user | fully regenerated each time |
-| `plot.py` | agent harness; user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
+| `plot.py` | pi agent (chat, via its built-in file tools); user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
 | `.data/NAME.parquet` (+ `.json` sidecar) | app, on import | SDK `bm.data()` reads the parquet in the subprocess; app reads the sidecar on workspace reopen (rehydration) | one per open dataset |
+| `.chat/*.jsonl` | sidecar (SessionManager) | sidecar (history replay); app never reads them | one per workspace, rotates on New chat |
 | output pickle (temp) | SDK `bm.show()` | runner (unpickles), deleted after | one per run |
 
 Note the asymmetry that keeps the design simple: the app only ever writes *data and
 knowledge* files; the only file the agent/user writes is `plot.py`; the only file the
-app executes is `plot.py`.
+app executes is `plot.py`. The app never parses agent actions — the chat transport
+(§9.1) carries text and tool telemetry for display only; **`plot.py` edits remain the
+sole coupling between agent and app**.
 
 
 ## 5. SDK & runner
@@ -206,7 +215,10 @@ The preview must keep the core exploratory interactions:
 
 ## 8. Agent skills & small-model support
 
-A core bet of v2: with good skills, even a small local model produces good plots.
+A core bet of v2: with good skills, even a small local model produces good plots —
+and the chat plan strengthens it: the session loads `AGENTS.md` as a context file
+with **guaranteed pickup** (no reliance on the harness or the user remembering to
+read it).
 
 - `AGENTS.md` in the workspace: SDK reference (copy-pasteable), hard rules (always read
   `datasets.md`, always end with `bm.show()`), and **recipes** for the seismic staples:
@@ -221,26 +233,65 @@ A core bet of v2: with good skills, even a small local model produces good plots
 ## 9. Tech stack & architecture
 
 - Python ≥ 3.11, **uv**, **ruff** + **ty**.
-- Deps: pandas, pyarrow, holoviews, panel, datashader. (watchdog optional — polling
-  fallback is fine.)
+- Deps: pandas, pyarrow, holoviews, panel, datashader, httpx (SSE client for the chat
+  sidecar). (watchdog optional — polling fallback is fine.)
 - **UI-free core** (rule carried over): `better_mad/core` = loading, workspace model,
-  runner, SDK, manifest generation. All headless, all pytest-covered.
-  `better_mad/app` = Panel shell: terminal pane, preview/code center, files panel.
+  runner, SDK, manifest generation, **sidecar lifecycle**. All headless, all
+  pytest-covered. `better_mad/app` = Panel shell: chat pane, preview/code center,
+  files panel.
 - CLI: `better-mad [files...]` → workspace + server + browser, as in v1.
+- **Node ≥ 20** for the chat sidecar (§9.1); the app degrades gracefully when it is
+  missing (chat pane banner, everything else works).
+
+### 9.1 Agent chat sidecar (Node)
+
+The pi SDK is Node-only, so the app spawns a small **Node sidecar process** that owns
+the agent session — the pattern proven by the pwb project (Fastify + SSE chat
+transport over `createAgentSession`):
+
+- **Transport contract** (localhost only, derived from pwb's `chat.ts`): `GET /events`
+  (SSE with heartbeat; `text_delta`, `agent_start/end`, `tool_execution_start/end`,
+  `stopped`, `reset`, `error` payloads), `POST /send` (202; one in-flight turn, else
+  409), `POST /stop` (`session.abort()`), `POST /new` (fresh session file; old file
+  stays), `GET /history` (replay for UI reload), `GET /health`.
+- **Session config**: `createAgentSession({ cwd: workspace, … })` with built-in file
+  tools **enabled** (they *are* the agent↔app protocol), context files **enabled**
+  (`AGENTS.md` auto-loads), no extensions/prompt-templates/themes, sessions persisted
+  to `workspace/.chat/` via `SessionManager` (resume most recent on boot). A watchdog
+  aborts hung provider calls (pwb default: 5 min) so a dead turn can never wedge the
+  busy flag.
+- **Model**: resolved from the user's `~/.pi/agent` provider config via `ModelRuntime`
+  (pwb's `resolveModel("provider/model")`); a `--model` CLI flag overrides; the
+  resolved model id shows in the app header.
+- **Lifecycle (Python, core)**: pick a free localhost port, spawn the sidecar
+  (`sidecar/` in the repo), poll `/health`, restart once on crash, then degrade the
+  chat pane to a banner (preview/editor/files keep working — they never depend on the
+  agent). Teardown on app exit.
+- **Chat UI (app)**: `pn.chat` widgets (ChatFeed/ChatAreaInput) fed by a daemon
+  SSE-reader thread → `queue.Queue` → the existing `tick()` drain (same threading
+  rules as the runner results); streaming deltas, tool notes, busy/stop/new-chat.
+- The sidecar carries **no better-mad logic** — no custom tools in v2 (§11). It is a
+  thin pi-session host; the workspace filesystem stays the only protocol.
 
 ## 10. Security model
 
 - Generated scripts run **unsandboxed**, with the user's privileges, on the user's
   machine — identical to running the agent in a plain terminal. The app does not fetch,
   exec, or auto-run anything from the network; execution only follows edits to `plot.py`.
-- The trust boundary is the agent harness itself; better-mad stays out of that decision.
+- The agent itself runs in the Node sidecar with the same user privileges and the same
+  built-in file tools it would have in a terminal. Chat text goes to whichever provider
+  the user configured in `~/.pi/agent` — the app adds no new network parties and stores
+  no credentials (the sidecar reuses pi's auth store).
+- The trust boundary is the user's choice of model/provider in their pi config;
+  better-mad stays out of that decision.
 - Documented plainly in README and first-run hint.
 
 ## 11. Future work (explicitly not v2, ordered)
 
 1. Multiple scripts / script tabs, script history & diff
-2. Embedded agent SDK chat panel as an alternative to the terminal (same workspace
-   protocol — the design intentionally doesn't block this)
+2. Embedded pty terminal as an alternative agent surface for non-pi harnesses
+   (claude-code, codex, aider…) — the original v2 decision, demoted 2026-11-02 when
+   the pi chat panel (§9.1) replaced it; same workspace protocol either way
 3. Selection → data workflows: export selected points to CSV, feed selection back to
    the agent ("plot only these")
 4. Session persistence: files + parser settings + `plot.py` + workspace path
@@ -249,3 +300,5 @@ A core bet of v2: with good skills, even a small local model produces good plots
 7. Cross-file joins/expressions (if still needed once the agent can do them in code)
 8. AppImage packaging
 9. Gridding/interpolation for map views (still explicitly out by default)
+10. Custom agent tools beyond the built-ins (e.g. a `run_script` trigger, dataset
+    introspection tools) — the filesystem protocol needs none of them

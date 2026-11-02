@@ -97,45 +97,91 @@ The new engine; fully headless and pytest-covered.
      overridden. Gotchas found: HoloViews prepends its own `default_tools` (must
      be cleared or every tool appears twice), and overlay-level `tools` opts are
      inert (an overlay's toolbar is the union of its children's — apply per leaf).
-  R1 (Terminal widget) still open for M3.
+  R1 (pty Terminal widget) closed 2026-11-02 without a spike — the chat-panel
+  re-scope (M3) removed the terminal from v2 entirely.
 
-## M3 — Full shell: terminal, editor, files panel (3–4 days)
-- Left: embedded terminal (Panel Terminal widget / pty), cwd = workspace, restart action.
-- Center: Preview ⟷ Code toggle; code editor bound to `plot.py` (Ctrl+S + debounced
-  auto-save); external-change policy (clean → reload; dirty → Reload/Overwrite banner);
-  collapsed Output drawer with last run's stdout/stderr.
-- Right: file cards with column lists + click-to-copy sanitized names, import settings
-  block (delimiter/sentinels/re-parse), close-file confirm when referenced.
-- Drag-resizable columns, widths persisted (CSS-variable mechanism from v1).
-- **Exit:** the full loop in one window: import → ask agent (or hand-edit) → preview,
-  with all three panels functional at 1920×1080.
+## M3 — Full shell: chat panel, editor, files panel (3–4 days)
+
+**2026-11-02 re-scope:** the left pane is now an **embedded pi chat panel** (design
+§9.1) instead of a pty terminal — the terminal moves to future work (design §11.2).
+Reference implementation: the pwb project (`~/pwb` — Fastify chat transport + pi SDK
+`AgentSession` + manager with busy/stop/watchdog). Split into small steps:
+
+- **M3.1 — Node chat sidecar** (`sidecar/`, TypeScript): pi SDK `AgentSession` behind
+  pwb's chat contract — `GET /events` (SSE + heartbeat: `text_delta`, `agent_start/end`,
+  `tool_execution_start/end`, `stopped`, `reset`, `error`), `POST /send` (202/busy-409),
+  `POST /stop` (`session.abort()`), `POST /new`, `GET /history`, `GET /health`.
+  Session: `cwd = workspace` (argv), built-in file tools **on** (they are the protocol),
+  context files **on** (`AGENTS.md` auto-loads), no extensions/templates/themes,
+  sessions at `workspace/.chat/` (`SessionManager`, resume recent on boot), watchdog
+  abort on hung provider calls (pwb: 5 min). Model: `--model provider/model` arg
+  resolved via `ModelRuntime` against `~/.pi/agent`; default = pi default.
+  *Exit:* run the sidecar against a fixture workspace; `curl` the endpoints; a
+  "write a hello plot.py" prompt produces the file; SSE streams text + tool events.
+- **M3.2 — Sidecar lifecycle in core** (`core/agent.py`, headless + pytest): pick a
+  free localhost port, spawn `node sidecar/dist/…`, poll `/health`, expose base URL;
+  clean teardown; restart-once-on-crash then degrade. Tests run against the real
+  sidecar when node + deps exist (skipif otherwise) plus a stub-server path for CI.
+  *Exit:* pytest spins workspace + sidecar → health green → shutdown clean; kill -9
+  the sidecar → restart → health green again.
+- **M3.3 — Chat pane in the app** (`app/chat.py`): `pn.chat` (ChatFeed/ChatAreaInput)
+  in the left column. A daemon SSE-reader thread pushes events into `queue.Queue`;
+  the existing `tick()` drains them (thread rules per AGENTS.md — never touch widgets
+  from the reader thread; `tick()` must not raise; catch `queue.Empty` first).
+  Streaming deltas into the live bubble, tool notes ("⚙ name"), busy state disabling
+  input, Stop → `/stop`, New chat → `/new` + clear transcript, history replay on pane
+  init (`/history`), sidecar-down → banner with retry. Add `httpx` dep.
+  *Exit:* type "scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ" → agent
+  writes `plot.py` → watcher runs → preview updates. **The full loop in one window.**
+- **M3.4 — Code view** (as originally planned): center **Preview ⟷ Code** toggle;
+  editor bound to `plot.py` (Ctrl+S + debounced auto-save); external-change policy
+  (clean → silent reload; dirty → Reload/Overwrite banner); collapsed Output drawer
+  with last run's stdout/stderr.
+- **M3.5 — Files panel + resizable columns** (as originally planned): right panel
+  file cards with column lists + click-to-copy sanitized names, import settings block
+  (delimiter/sentinels/re-parse), close-file confirm when referenced; drag-resizable
+  columns with persisted widths (CSS-variable mechanism from v1).
+- **Exit (M3):** import → chat (or hand-edit) → preview, all three panels functional
+  at 1920×1080; sidecar crash degrades to a banner without touching preview/editor.
 
 ## M4 — Agent skills & end-to-end validation (2–3 days)
 - Author the workspace `AGENTS.md`: SDK reference, hard rules, and complete runnable
   recipes for: colored scatter map (equal aspect, datashaded), crossplot, histogram,
   line/CMP gather, percentile-clipped colormaps, hover/selection via streams.
 - Encode v1 gotchas (rasterize-first-vdim, sizing policies, pandas-3 parsing).
-- Validate with at least two harnesses (one cloud, one local) against the sample
-  files; fix skill wording where models stumble.
+- Validate **primarily through the embedded chat panel** (AGENTS.md now loads as a
+  context file with guaranteed pickup — design §8); keep one external harness in the
+  loop as a regression check that nothing drifted into chat-only coupling.
+- Fix skill wording where models stumble; keep `datasets.md` stats rich enough that
+  the model never needs to read the parquet files.
 - **Exit:** a small/local model produces a correct datashaded map of the 708k-row
-  sample file by following the skills, without user code edits.
+  sample file through the chat panel, without user code edits.
 
 ## M5 — Polish (1–2 days)
-- Status-line detail (rows rendered, run time), empty/first-launch states,
-  terminal hint text, README security note.
-- Bug pass on watcher races (agent multi-write bursts), editor/agent conflicts.
+- Status-line detail (rows rendered, run time), empty/first-launch states, chat hint
+  text, README security + Node-requirement note.
+- Bug pass on watcher races (agent multi-write bursts), editor/agent conflicts,
+  sidecar lifecycle edges (port collisions, crash-loop backoff).
 - **Stretch (future milestones, design §11):** script history/diff, PNG export,
-  session persistence, selection→CSV, embedded SDK chat panel.
+  session persistence, selection→CSV, pty terminal pane for non-pi harnesses.
 
 ## Risks & spikes
-- **R1 Terminal widget** — spike Panel's pty Terminal early (M3 or sooner): spawn,
-  resize, scrollback, cwd control. Fallback if inadequate: xterm.js in a custom pane.
+- **R1 Node sidecar lifecycle** (re-scoped 2026-11-02 from the pty-terminal spike —
+  dropped): spawn/health/crash-restart and port handling are ours to own, but the
+  transport and manager semantics are lifted from pwb's proven code (`manager.ts`,
+  `sessions.ts`, `chat.ts`). Node ≥ 20 becomes a runtime requirement; the app must
+  degrade to a banner when it is missing.
+- **R1b pn.chat streaming from a background thread** — pn.chat widgets are Panel
+  objects with the usual threading rules; stream via the established queue + `tick()`
+  drain only (never from the SSE reader thread), and `tick()` must never raise.
 - **R2 HoloViews pickling** across the subprocess boundary — ⚠ Elements/Curve
   pickle fine, but **DynamicMaps don't** (rasterize/datashade closures); the SDK
   materializes them to static frames (M2 fix). Overlays/Layouts of Elements OK.
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
+  The chat agent writes `plot.py` via its file tools — same burst profile as before.
 - **R4 Model capability floor** — if small local models fail even with skills,
-  mitigation is richer recipes/templates, not a product change (design §8).
+  mitigation is richer recipes/templates, not a product change (design §8). The
+  chat panel makes this cheaper to test (direct iteration loop in-app).
 
 ## Rough total: ~2 weeks of focused work to end of M5 (v2 complete).
