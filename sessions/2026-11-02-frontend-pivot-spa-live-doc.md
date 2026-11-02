@@ -20,8 +20,9 @@ dissatisfaction with the original v2 plan and by the `~/pwb` reference project
 - Smoke test (in-repo venv, bokeh 3.9.2): 500k-point datashaded DynamicMap
   (mean-z aggregation) renders in-process via `hv.renderer("bokeh").get_plot`,
   attaches to a bokeh document, carries `RangeXYCallback` + `PlotSizeCallback`
-  → zoom re-rasterization works server-side. `json_item` + `server_document`
-  both available (not needed for the live path, but confirms embedding options).
+  → zoom re-rasterization works server-side. Embedding facts for M3.4:
+  `server_session(model, url, session_id=…)` is the right embed (shared doc);
+  `server_document` takes **no** session_id (fresh doc per tab) — do not use it.
 - pwb reference read end-to-end: chat routes, PersonaManager (busy/stop/watchdog),
   session factory (`DefaultResourceLoader`, `SessionManager`, `ModelRuntime`),
   vanilla-JS chat client — the port plan is concrete.
