@@ -14,20 +14,35 @@ The runner (``better_mad.core.runner``) provides two environment variables:
 - ``BETTER_MAD_DATA_DIR``: directory of per-dataset parquet snapshots,
 - ``BETTER_MAD_OUTPUT``: path where ``show()`` pickles the final figure.
 
+``show()`` has two transports (design.md §5):
+
+- **Attach mode** (live render worker, M3.1+): the worker installs a callable
+  in ``_ATTACH`` before executing a script; ``show()`` hands the object over
+  eagerly and ``BETTER_MAD_OUTPUT`` is never demanded. The worker keeps the
+  object dynamic (``rasterize()`` output re-rasterizes on zoom).
+- **Pickle mode** (legacy subprocess runner): without ``_ATTACH``, the figure
+  is materialized and pickled to ``$BETTER_MAD_OUTPUT``.
+
 This module must stay dependency-light and never import Panel; it runs inside
-the script subprocess, not in the app.
+the script process (subprocess, or the worker's exec namespace).
 """
 
 from __future__ import annotations
 
 import os
 import pickle
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
 
 ENV_DATA_DIR = "BETTER_MAD_DATA_DIR"
 ENV_OUTPUT = "BETTER_MAD_OUTPUT"
+
+# Set by the live render worker (better_mad.worker) around each script exec;
+# when present, show() attaches instead of pickling (design.md §5). Workers
+# must restore the previous value (normally None) after the run.
+_ATTACH: Callable[[object], None] | None = None
 
 
 def _ensure_backend() -> None:
@@ -164,14 +179,22 @@ def _capture_options(obj: object) -> list[dict[str, dict[str, object]] | None]:
 def show(obj: object) -> None:
     """Register a figure as the preview output. Last call wins.
 
-    Accepts anything picklable; intended for HoloViews ``Element``, ``Overlay``,
-    ``Layout`` and ``NdLayout`` objects. DynamicMaps (e.g. ``rasterize()`` output)
-    are materialized to their current frame first, and explicitly applied options
-    are captured alongside the figure (they don't survive pickle on their own);
-    callable-valued opts such as ``hooks`` are dropped at capture (see
+    **Attach mode** (render worker installed ``_ATTACH``): the object is handed
+    to the worker as-is — rendering happens there, eager and in-process, so
+    DynamicMaps stay dynamic and invalid opts raise at run time.
+
+    **Pickle mode** (legacy subprocess runner): accepts anything picklable;
+    intended for HoloViews ``Element``, ``Overlay``, ``Layout`` and ``NdLayout``
+    objects. DynamicMaps (e.g. ``rasterize()`` output) are materialized to
+    their current frame first, and explicitly applied options are captured
+    alongside the figure (they don't survive pickle on their own); callable-
+    valued opts such as ``hooks`` are dropped at capture (see
     ``_capture_options``). The write is atomic, so a watching app never reads a
     half-written figure.
     """
+    if _ATTACH is not None:
+        _ATTACH(obj)
+        return
     figure = _materialize(obj)
     payload = {"figure": figure, "options": _capture_options(figure)}
     out = _output_path()
