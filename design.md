@@ -16,14 +16,14 @@ the `archive/codebase` branch.
 | 1 | Product direction | **Instrument, not omnibus**: no attempt to menu-ify every plot type. Users get a programmable surface (agent + editable code) they can tailor |
 | 2 | Agent integration | **Embedded chat panel** (left pane) driven by the pi SDK inside a **Node sidecar process** spawned by the app (the pwb pattern: SSE/HTTP chat transport over a persistent `AgentSession`). Models resolve from the user's existing `~/.pi/agent` providers — no new API keys. **2026-11-02 update:** replaces the original v2 decision (embedded pty terminal, any harness); the pty terminal moves to future work (§11). External harnesses still work from a normal terminal — coupling stays filesystem-only |
 | 3 | Agent ↔ app protocol | **Filesystem**. The agent edits the plot script; the app watches the file and re-runs it. No sockets, no proprietary protocol |
-| 4 | Plotting stack | **HoloViews + Panel + Datashader** (carried over from v1; handles 1–2M-row files natively) |
-| 5 | Code execution | **Subprocess runner** with a small SDK (`show()` transport). Generated code never executes inside the app/server process |
+| 4 | Plotting stack | **HoloViews + Datashader** rendered on a **live bokeh-server document** in an isolated **render worker** process. **2026-11-02:** Panel dropped after M2 — the shell is a web-native **React/TS SPA** with a **FastAPI** hub (pwb pattern). Handles 1–2M-row files natively; zoom re-rasterizes server-side |
+| 5 | Code execution | `plot.py` executes **inside the render worker** (fresh namespace per run, watchdog timeout, kill/restart on fatal). Never inside the hub. **2026-11-02:** replaces the M1 subprocess-per-run + pickle transport, which forced static rasters |
 | 6 | Script model | One active script (`plot.py`) per workspace in v2. Multiple scripts/tabs: future work |
 | 7 | Code editing | Center pane toggles **Preview ⟷ Code**; the editor edits the same `plot.py` the agent writes. External changes reload the editor |
 | 8 | Data loading | Reuse the v1 core loader from `archive/codebase`: delimiter detect, hostile-header sanitization, configurable null sentinels, float32, parquet cache |
 | 9 | Agent knowledge | Workspace ships an **`AGENTS.md` skill file + auto-generated dataset manifest** so even small local models can produce correct plots by adapting recipes |
 | 10 | Sandbox | **None.** Scripts run with the user's own privileges — same trust model as running the agent in a normal terminal. Documented, not hidden |
-| 11 | Distribution | Unchanged: CLI starts a Panel server on localhost, opens the system browser |
+| 11 | Distribution | Unchanged in spirit: CLI starts the **hub** (uvicorn) on localhost — it spawns the render worker + chat sidecar, serves the SPA, and opens the system browser |
 
 ---
 
@@ -34,8 +34,9 @@ instrument the user tailors:
 
 ```
 import files → describe intent to the agent → agent writes plot.py
-            → app runs it → interactive preview
+            → render worker runs it → live interactive preview
             → adjust: edit the code by hand, or talk to the agent
+            → zoom/pan re-rasterizes server-side (datashader, live document)
 ```
 
 - The **agent does the composition**: picking columns, choosing plot types, styling,
@@ -58,7 +59,8 @@ import files → describe intent to the agent → agent writes plot.py
 └────────────────┴─────────────────────────────┴───────────────────┘
 ```
 
-- **Left — chat**: chat UI over the pi agent session hosted by the Node sidecar
+- The shell is a **web-native SPA (React/TS + Vite)** served by the Python hub; the
+  plot pane embeds the render worker's live bokeh document (§5). Three panes:
   (§9.1). The agent edits `plot.py` with its built-in file tools; replies stream in
   with tool notes ("⚙ editing plot.py…"). One in-flight turn at a time; Stop button
   aborts, New-chat rotates the session. History persists per workspace.
@@ -100,7 +102,7 @@ sequenceDiagram
     actor U as User
     participant H as pi agent<br/>(chat panel via sidecar)
     participant A as App<br/>(watcher + runner)
-    participant S as plot.py subprocess<br/>(better_mad.sdk)
+    participant S as render worker<br/>(plot.py via better_mad.sdk)
 
     Note over U,S: 1 · Startup
     U ->> A: better-mad [files]
@@ -117,12 +119,12 @@ sequenceDiagram
     H ->> H: AGENTS.md (context file) + datasets.md
     H --) A: write plot.py
     A ->> A: watcher: debounce + stability check
-    A ->> S: spawn python plot.py<br/>env: BETTER_MAD_DATA_DIR, BETTER_MAD_OUTPUT
+    A ->> S: worker: exec plot.py in-process<br/>(fresh namespace, watchdog armed)
     S ->> S: bm.data(NAME) reads .data/NAME.parquet
-    S --) A: bm.show(fig) pickles figure → BETTER_MAD_OUTPUT
-    S -->> A: exit 0 + stdout/stderr
-    A ->> A: unpickle figure
-    A -->> U: render preview (pan/zoom/select) · status ✓
+    S --) S: bm.show(fig) attaches figure to the live document
+    S -->> A: run result (ok/error, stdout/stderr, time)
+    A -->> U: live document pushes to the SPA · status ✓
+    Note over U,S: zoom/pan → DynamicMap re-rasterizes on the worker (~0.1–0.3 s)
 
     Note over U,S: 4 · Manual tweak — same pipeline
     U ->> A: edit plot.py in Code view, save
@@ -130,9 +132,11 @@ sequenceDiagram
     A -->> U: updated preview
 ```
 
-Failure branch of step 3: if the subprocess exits non-zero or times out, the runner
-returns the traceback/stderr; the app keeps the **last good figure** with a staleness
-badge and shows the error tail as a banner (§5, UX §6). No write to `plot.py` happens
+Failure branch of step 3: if `plot.py` raises, the run fails **inside the worker** —
+the worker survives, the document keeps its last good roots (staleness badge) and the
+error tail renders as a banner (§5, UX §6). If the script hangs or dies fatally, the
+watchdog kills the worker; the hub restarts it, **restores the last good document
+snapshot**, and does not auto re-run (no crash loops). No write to `plot.py` happens
 on failure — only the user or the agent edits the script.
 
 ### 4.2 File ledger
@@ -146,7 +150,7 @@ Who touches which workspace file, and when:
 | `plot.py` | pi agent (chat, via its built-in file tools); user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
 | `.data/NAME.parquet` (+ `.json` sidecar) | app, on import | SDK `bm.data()` reads the parquet in the subprocess; app reads the sidecar on workspace reopen (rehydration) | one per open dataset |
 | `.chat/*.jsonl` | sidecar (SessionManager) | sidecar (history replay); app never reads them | one per workspace, rotates on New chat |
-| output pickle (temp) | SDK `bm.show()` | runner (unpickles), deleted after | one per run |
+| doc snapshot (JSON, hub memory) | worker, after each successful run | hub — restores it after a worker restart | one per workspace |
 
 Note the asymmetry that keeps the design simple: the app only ever writes *data and
 knowledge* files; the only file the agent/user writes is `plot.py`; the only file the
@@ -155,9 +159,10 @@ app executes is `plot.py`. The app never parses agent actions — the chat trans
 sole coupling between agent and app**.
 
 
-## 5. SDK & runner
+## 5. SDK & render worker
 
-Scripts run in a **subprocess** and talk to the app through a tiny SDK:
+Scripts run inside an isolated **render worker** process — a bokeh server hosting one
+live document per workspace — and attach figures through the same tiny SDK:
 
 ```python
 import holoviews as hv
@@ -168,22 +173,38 @@ df = bm.data("file_a")  # DataFrame from the app's loaded datasets
 print(bm.list_data())  # available dataset names + shapes
 
 pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
-bm.show(pts)  # registers the figure as the preview output
+bm.show(pts)  # attaches the figure to the worker's live document
 ```
 
 - `bm.data(name)` returns the parsed DataFrame (from the parquet cache — instant).
-- `bm.show(obj)` serializes the HoloViews object to an app-provided output path
-  (pickle, local-only transport). Accepted: `hv.Element`, `Overlay`, `Layout`,
-  `NdLayout`. Last `show()` wins. DynamicMaps (e.g. `rasterize()` output) don't
-  pickle; the SDK materializes them to their current frame — rasterized previews
-  are therefore static (pan/zoom work, no re-aggregation on zoom). Options applied
-  via `.opts()` live in HoloViews' global registry keyed by object id and also
-  don't pickle; the SDK captures them and the runner re-applies them after load.
-- The runner captures **stdout/stderr**, enforces a **timeout** (default 60 s,
-  configurable), and returns: figure, run time, stderr tail.
-- On failure: **the last good plot stays up** with a staleness badge; the error tail
-  renders as a banner in the center pane. Never a crash, never a modal.
-- The runner is core (headless, pytest-covered); the preview pane is a thin consumer.
+  **The SDK's public API is unchanged from M1**; only `show()`'s implementation moved
+  from pickle-to-file to attach-to-document.
+- `bm.show(obj)` renders in-process and attaches to the worker's bokeh document.
+  Accepted: `hv.Element`, `Overlay`, `Layout`, `NdLayout`; last `show()` wins. Because
+  everything stays in one process: **DynamicMaps stay dynamic** (`rasterize()`/
+  `datashade()` re-rasterize on zoom via bokeh range callbacks) and `.opts()` apply
+  natively — the M2 pickle-era hacks (opts capture/re-apply, DynamicMap
+  materialization) are gone. Rendering is eager, so invalid opts raise **at run time**
+  and become clean error results instead of lazy render-time surprises.
+- **Worker shape**: a Python process running a programmatic `bokeh.server.Server`
+  (single shared session document) plus a minimal control API on the same port via
+  `extra_patterns`: `POST /run` (exec `plot.py`), `GET /health`, `GET /doc.json`
+  (snapshot for hub-side last-good retention). Runs execute on the server's IOLoop
+  thread in a **fresh module namespace**; stdout/stderr are captured; a **watchdog**
+  (default 60 s, configurable) kills the worker on hangs.
+- **Lifecycle & failure semantics** (owned by the hub, §9): script exception → error
+  result, document untouched (last good roots + staleness badge). Fatal/hang → kill,
+  restart worker, restore last good snapshot, **no auto re-run** (a script that kills
+  the worker must not crash-loop). Restart-after-failure counts are reported in the
+  status line.
+- **Isolation trade-off** (accepted): in-process exec loses per-run OS isolation — a
+  script can pollute module/global state or leak memory. Mitigations: fresh namespace
+  per run, recycle the worker after runs that raised, hard cap on consecutive runs
+  (recycle anyway). The trust model is unchanged: user privileges, no sandbox (§10);
+  a fatal script can only cost its own worker.
+- The worker is core-adjacent, headless and pytest-covered (spawn it, run scripts,
+  assert on the document); the SPA's plot pane is a thin consumer that embeds the
+  live document.
 
 ## 6. Input data (carried over from v1)
 
@@ -203,12 +224,16 @@ UI-free and fully tested).
 
 ## 7. Preview interactivity
 
-The preview must keep the core exploratory interactions:
+The preview is a **live bokeh document** — interactions are server-real, not baked
+into a static image:
 
-- **Pan / wheel-zoom / box-zoom / reset** via the standard Bokeh toolbar.
+- **Pan / wheel-zoom / box-zoom / reset** via the standard Bokeh toolbar; on
+  datashaded plots, every range change re-rasterizes on the worker (~0.1–0.3 s for
+  ~700k points locally) and streams the new raster back.
 - **Box & lasso selection** enabled on the toolbar.
 - Vector hover and linked selection beyond the toolbar are **script-side**: the agent or
-  user adds `hv.streams`/`HoverTool` in `plot.py`; AGENTS.md ships recipes.
+  user adds `hv.streams`/`HoverTool` in `plot.py`; AGENTS.md ships recipes. Under the
+  live document these update interactively (no re-run needed).
 - **Datashader is script-side too** (recipes: `rasterize(...)` for >~100k points,
   mean-of-z aggregation, `cnorm`/clim handling). The skill file encodes the v1 lessons
   (rasterize aggregates the first vdim, etc.).
@@ -232,24 +257,52 @@ read it).
 
 ## 9. Tech stack & architecture
 
-- Python ≥ 3.11, **uv**, **ruff** + **ty**.
-- Deps: pandas, pyarrow, holoviews, panel, datashader, httpx (SSE client for the chat
-  sidecar). (watchdog optional — polling fallback is fine.)
-- **UI-free core** (rule carried over): `better_mad/core` = loading, workspace model,
-  runner, SDK, manifest generation, **sidecar lifecycle**. All headless, all
-  pytest-covered. `better_mad/app` = Panel shell: chat pane, preview/code center,
-  files panel.
-- CLI: `better-mad [files...]` → workspace + server + browser, as in v1.
-- **Node ≥ 20** for the chat sidecar (§9.1); the app degrades gracefully when it is
-  missing (chat pane banner, everything else works).
+**2026-11-02: Panel dropped.** The M2 app layer fought the framework (15+ documented
+gotchas, static-raster limitation) and capped look & feel. The rewrite keeps the
+entire headless core and replaces only the thin app layer. Process layout (all
+localhost; the hub owns every spawn):
+
+```
+┌──────────┐  REST/SSE   ┌────────────┐  control API  ┌────────────────┐
+│ SPA      │◄───────────►│ Hub        │◄─────────────►│ Render worker  │
+│ React/TS │  embeds doc │ FastAPI    │  doc snapshot │ bokeh server   │
+│ (Vite)   │◄────────────┼────────────┼──────────────►│ (plot.py exec) │
+└──────────┘  WebSocket  │  + proxy   │  SSE proxy    └────────────────┘
+     ▲        (live doc)  │  /api/chat │◄─────────────►┌────────────────┐
+     └───────────────────►│            │   chat API    │ Chat sidecar   │
+                        └────────────┘               │ Node, pi SDK   │
+                                                     └────────────────┘
+```
+
+- **Hub** (`better_mad/hub/`, Python, FastAPI + uvicorn): owns the workspace (core),
+  file import, the `plot.py` watcher, run orchestration, worker + sidecar lifecycle,
+  chat proxying (single origin — no CORS), and serves the built SPA. Endpoints:
+  files/import · files list · plot.py get/put · run · status · events (SSE:
+  run results, worker lifecycle, embed epoch) · plot/embed (worker URL + session id).
+- **Render worker** (`better_mad/worker/`): see §5. Headless, pytest-covered.
+- **Chat sidecar** (`sidecar/`, Node/TypeScript): see §9.1.
+- **SPA** (`web/`, React + TypeScript + Vite): three-pane shell (chat | plot/code |
+  files), CodeMirror 6 editor, plot pane embedding the live document via
+  `bokeh.embed.server_document`, chat pane (React port of pwb's client), files pane.
+  Dev mode: Vite dev server proxies `/api` → hub (pwb pattern); prod: hub serves
+  `web/dist`.
+- **Core** (`better_mad/core/`, unchanged rule): loading, workspace model, manifest
+  generation, script execution semantics, sidecar lifecycle — headless, pytest-covered.
+  No framework imports in core (worker imports bokeh/hv; hub imports fastapi; neither
+  leaks into loading/workspace/runner logic).
+- Python ≥ 3.11 (**uv**, ruff, ty); **Node ≥ 20** (sidecar + web tooling); deps add
+  `fastapi`, `uvicorn`, `httpx`.
+- CLI: `better-mad [files...]` → workspace + hub + browser, as before.
 
 ### 9.1 Agent chat sidecar (Node)
 
-The pi SDK is Node-only, so the app spawns a small **Node sidecar process** that owns
-the agent session — the pattern proven by the pwb project (Fastify + SSE chat
-transport over `createAgentSession`):
+The pi SDK is Node-only, so the hub spawns a small **Node sidecar process** that owns
+the agent session — the pattern proven by the pwb project (SSE/HTTP chat transport
+over `createAgentSession`). Unchanged from the 2026-11-02 chat decision except the UI
+renderer (React pane instead of `pn.chat`):
 
-- **Transport contract** (localhost only, derived from pwb's `chat.ts`): `GET /events`
+- **Transport contract** (localhost only, derived from pwb's `chat.ts`; the hub
+  proxies it under `/api/chat/*` so the SPA sees one origin): `GET /events`
   (SSE with heartbeat; `text_delta`, `agent_start/end`, `tool_execution_start/end`,
   `stopped`, `reset`, `error` payloads), `POST /send` (202; one in-flight turn, else
   409), `POST /stop` (`session.abort()`), `POST /new` (fresh session file; old file
@@ -263,13 +316,9 @@ transport over `createAgentSession`):
 - **Model**: resolved from the user's `~/.pi/agent` provider config via `ModelRuntime`
   (pwb's `resolveModel("provider/model")`); a `--model` CLI flag overrides; the
   resolved model id shows in the app header.
-- **Lifecycle (Python, core)**: pick a free localhost port, spawn the sidecar
-  (`sidecar/` in the repo), poll `/health`, restart once on crash, then degrade the
-  chat pane to a banner (preview/editor/files keep working — they never depend on the
-  agent). Teardown on app exit.
-- **Chat UI (app)**: `pn.chat` widgets (ChatFeed/ChatAreaInput) fed by a daemon
-  SSE-reader thread → `queue.Queue` → the existing `tick()` drain (same threading
-  rules as the runner results); streaming deltas, tool notes, busy/stop/new-chat.
+- **Lifecycle**: owned by the hub alongside the worker — spawn, health-poll,
+  restart-once-on-crash, then degrade the chat pane to a banner (plot/editor/files
+  keep working — they never depend on the agent).
 - The sidecar carries **no better-mad logic** — no custom tools in v2 (§11). It is a
   thin pi-session host; the workspace filesystem stays the only protocol.
 
@@ -278,6 +327,7 @@ transport over `createAgentSession`):
 - Generated scripts run **unsandboxed**, with the user's privileges, on the user's
   machine — identical to running the agent in a plain terminal. The app does not fetch,
   exec, or auto-run anything from the network; execution only follows edits to `plot.py`.
+  A fatal script can only cost its own worker process (kill → restart, §5).
 - The agent itself runs in the Node sidecar with the same user privileges and the same
   built-in file tools it would have in a terminal. Chat text goes to whichever provider
   the user configured in `~/.pi/agent` — the app adds no new network parties and stores
@@ -302,3 +352,8 @@ transport over `createAgentSession`):
 9. Gridding/interpolation for map views (still explicitly out by default)
 10. Custom agent tools beyond the built-ins (e.g. a `run_script` trigger, dataset
     introspection tools) — the filesystem protocol needs none of them
+11. Client-side WebGL layer for instant hover/selection on ≤~2M points (hybrid: the
+    worker ships binary column buffers; datashader raster stays for aggregation
+    quality) — only if live re-rasterization latency ever feels insufficient
+12. Worker recycling heuristics beyond run-failure (memory ceiling, consecutive-run
+    cap) if leaks prove real in practice

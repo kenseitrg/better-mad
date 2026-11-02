@@ -4,7 +4,8 @@
 **better-mad** — an LLM-agent-driven instrument for visualizing seismic attributes from
 large tabular text files (1–2M rows). Users load data, describe plots to an embedded
 pi agent chat, and get back an editable plotting script plus a live
-interactive preview (HoloViews + Panel + Datashader) served as a localhost web app.
+interactive preview (HoloViews + Datashader on a live bokeh server, React SPA shell)
+served as a localhost web app.
 
 ## Read these first, in order
 | File | Role |
@@ -24,8 +25,9 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
 - Phase: **M2 done** — headless engine + minimal preview app live. Next step:
-  milestone **M3** — full shell: pi chat panel, editor, files panel (PLAN.md;
-  re-scoped 2026-11-02 from pty terminal to embedded pi chat).
+  milestone **M3** — full shell as **React SPA + FastAPI hub + live bokeh-server
+  render worker + Node chat sidecar** (PLAN.md; two re-scopes on 2026-11-02: pty
+  terminal → pi chat panel, then Panel → web-native SPA with live document).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -33,17 +35,23 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
   editable code) instead of menus for every plot type.
 - Agent integration: **embedded pi chat panel** — a Node sidecar process hosts a pi
   SDK `AgentSession` (cwd = workspace) and serves pwb's SSE/HTTP chat contract; the
-  app renders it with `pn.chat`. Coupling remains **filesystem-only** (agent edits
+  app renders it with a React chat pane (pwb client pattern). Coupling remains **filesystem-only** (agent edits
   `plot.py`, app watches and re-runs). The app spawns no pty and never parses agent
   traffic beyond chat display events. Reference implementation: `~/pwb`.
-- Stack: **HoloViews + Panel + Datashader**, pandas; uv + ruff + ty.
-- Execution: agent/user scripts run in a **subprocess** via the `better_mad.sdk`
-  transport (`show()` pickles the figure to an app-provided path). Never in-process.
-  No sandbox — user-privilege execution is the documented trust model.
+- Stack: **HoloViews + Datashader** rendered on a **live bokeh-server document** in
+  an isolated render worker; **React/TS SPA** frontend; **FastAPI** hub; Node pi-chat
+  sidecar; pandas; uv + ruff + ty (Python), Vite + tsc (TypeScript). Panel dropped
+  2026-11-02 (look & feel, framework fights, static rasters).
+- Execution: `plot.py` runs **inside the render worker** (isolated process, fresh
+  namespace per run, watchdog timeout, kill/restart on fatal) against a live bokeh
+  document; `bm.show()` attaches figures — **DynamicMaps stay dynamic** (zoom
+  re-rasterizes). Never executes in the hub. (2026-11-02: replaces subprocess +
+  pickle transport, which forced static rasters.)
 - One active script (`plot.py`) per workspace in v2.
 - Nulls: configurable sentinels; **0 is always a valid value**. No gridding/
   interpolation.
-- Distribution: CLI starts Panel server → system browser. AppImage is stretch-only.
+- Distribution: CLI starts the FastAPI hub (spawns render worker + chat sidecar,
+  serves the SPA) → system browser. AppImage is stretch-only.
 - I/O is **browser-native** (imports/downloads), not server-side file paths.
 
 ## Sample data gotchas (`data/`)
@@ -57,9 +65,12 @@ Two 121 MB files, ~708k rows × 9 columns. Know these before touching the loader
 - Never commit these files or derivatives >~a few hundred rows.
 
 ## Architecture rule
-**UI-free core.** Loading, workspace model, runner, SDK, and manifest generation live
-in `better_mad/core` and must be headless and pytest-covered. The Panel app in
-`better_mad/app` is a thin layer over the core. Don't let UI concerns leak into core.
+**UI-free core.** Loading, workspace model, script-execution semantics, SDK, manifest
+generation, and sidecar/worker lifecycle live in `better_mad/core` and must be
+headless and pytest-covered. Thin layers over the core: `better_mad/worker/` (bokeh
+server render worker), `better_mad/hub/` (FastAPI transport), `web/` (React SPA),
+`sidecar/` (Node pi-chat host). Don't let UI concerns leak into core — no framework
+imports in `core/`.
 
 ## Working conventions
 - Python ≥3.11 (system has 3.14), manage with `uv`; lint/format `ruff`, types `ty`.
@@ -70,67 +81,40 @@ in `better_mad/core` and must be headless and pytest-covered. The Panel app in
   **same commit**, including the decisions table at the top of each file.
 - Prefer small commits per milestone step; reference the milestone (e.g. "M1: runner …").
 - Errors degrade to banners/placeholders; modals only for destructive confirmations.
-- Panel gotcha: string-form `@pn.depends("widget.value")` requires a
-  `param.Parameterized` owner; on plain classes use explicit `pn.bind(fn, widget, ...)`.
+
+## Gotchas (current architecture)
 - HoloViews gotcha: `rasterize(points, column=...)` **silently ignores `column`** for
   `hv.Points` and aggregates the **first vdim**. To mean-aggregate z, shade a dedicated
   `hv.Points(..., vdims=[z])`.
-- HoloViews gotcha: bokeh sizing policies are not exposed as opts and
-  `responsive=True` yields unusable `None` dimensions; set policies via an opts
-  `hooks=[...]` callback on `plot.state` (see v1 `fit_container_hook` on
-  `archive/codebase`).
 - HoloViews gotcha: a bare `import holoviews` may set `Store.current_backend` while
   **no plotting module is loaded** (`Store.loaded_backends() == []`) — `.opts()` then
-  raises "No plotting extension is currently loaded". Test `loaded_backends()`, not
-  `current_backend`. In script subprocesses the SDK handles this (`sdk._ensure_backend`);
-  any process that applies opts must call `hv.extension("bokeh")` itself.
-- Panel gotcha: `pn.Tabs.active` starts at 0, so appending the first tab fires **no**
-  `active` event — drawer-style watchers must also watch `objects`.
-- Panel gotcha: most widgets default to `width=300, sizing_mode=None`; set
-  `sizing_mode="stretch_width"` on widgets in narrow containers. `pn.config.raw_css`
-  is a **list** — append, never `+=`.
-- Panel gotcha (1.7+): `Widget.name` → `label`, `Button.button_type` → `color`
-  (old params emit PendingDeprecationWarning).
-- App convention: background work (script runs) posts results through a
-  `queue.Queue` drained by a periodic `tick()` callback — never mutate widgets from
-  worker threads directly (see `app/preview.py`). Two hard rules for `tick()`:
-  (1) it must never raise (bokeh disables a periodic callback that dies — the whole
-  session freezes), so result application is try/except-guarded; (2) `queue.Empty`
-  is an `Exception` subclass — catch it explicitly before any broad `except Exception`.
-- HoloViews gotcha: opts are **lazy** — invalid values (e.g. a bad cmap) pass through
-  the script subprocess fine and only raise at **render time in the app process**.
-  Preview validates figures with a headless `hv.render()` before swapping them into
-  the live layout (a mid-sync exception can wedge the page), then degrades to a
-  banner keeping the last good plot.
-- Panel gotcha: `FastListTemplate` registers sidebar objects at doc init —
-  **replacing sidebar objects after serving never reaches the live page**. Mutate a
-  stable container's children instead.
-- CSS gotcha: JS layout shims must set the template's width **CSS variables**
-  (`--sidebar-width` / `--right-sidebar-width`), never inline `min/max-width`.
-- Panel gotcha (1.9): pane content renders inside **Shadow DOM** — headless/page
-  diagnostics must traverse `shadowRoot`s or they will conclude (wrongly) that
-  nothing rendered.
-- Panel gotcha: **FastListTemplate wraps each main item in a content-sized
-  fast-card**; its shadow-DOM slot never gets a definite height, so bokeh "fit"
-  sizing collapses figures (~40–70 px). Use VanillaTemplate (or force the card
-  chain's height) for full-height plot areas.
-- Panel gotcha: setting a pane's `.object` **while the session document is still
-  initializing renders 0-height figures** (fast scripts finish before page load).
-  Recreate the pane with the figure at construction instead (`_show_figure`).
-- HoloViews gotcha: **DynamicMaps don't pickle** (`rasterize()`/`datashade()`
-  output holds local closures) — `bm.show()` materializes them to their current
-  frame; previews of rasterized plots are therefore static (no re-aggregation on
-  zoom).
-- HoloViews gotcha: **`.opts()` does not survive pickle** — options live in
-  `Store.custom_options` keyed by object id. Any process boundary needs explicit
-  capture (`Store.lookup_options(..., defaults=False)`) + re-apply (`item.opts(**kw)`);
-  the SDK/runner pair does this (`_capture_options`/`_reapply_options`). Symptom if
-  forgotten: script styling silently ignored, plots render with default styles.
+  raises "No plotting extension is currently loaded". Any process that applies opts
+  must call `hv.extension("bokeh")` itself (the render worker does; test
+  `loaded_backends()`, not `current_backend`).
+- HoloViews gotcha: opts are **lazy** — invalid values (e.g. a bad cmap) raise at
+  render time, not at `.opts()`. In the worker this is safe: render is eager inside
+  `run`, so bad opts become clean error results while the document keeps its last
+  good roots.
+- Bokeh sizing gotcha: fit/stretch sizing policies are not exposed as hv opts; apply
+  them via an opts `hooks=[...]` callback on `plot.state` (v1 `fit_container_hook`,
+  `archive/codebase`). Re-verify under the SPA's plain CSS-sized container (no Panel
+  template in the chain anymore — should be easier, not harder).
+- Worker gotcha: script runs execute on the bokeh IOLoop thread — a long run blocks
+  document pushes for its duration (acceptable at ~seconds). The hub drives the
+  worker only through its control API (`/run`, `/health`, `/doc.json`), never by
+  poking its internals.
+- **Panel-era gotchas are historical** (Shadow DOM traversal, FastListTemplate card
+  collapse, sidebar registration, pane `.object` races, `tick()`/queue threading
+  rules, DynamicMap/opts pickling). They applied to the archived Panel app layer —
+  see `sessions/2026-08-17-v2-pivot-and-m2.md` and M2 commits. Do not carry them
+  into the new stack.
 
 ## Commands (fill in as milestones land)
 ```bash
 uv sync                 # install deps
-uv run better-mad       # start app (M2+)
+uv run better-mad       # start hub (+ worker, sidecar, SPA) (M3+)
 uv run pytest           # tests
 uv run ruff check . && uv run ty check   # lint + types
+npm install             # web/ + sidecar/ deps (Node ≥ 20; M3+)
+npm run dev             # Vite dev server, proxies /api → hub (M3+)
 ```

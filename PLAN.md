@@ -3,7 +3,8 @@
 v2 is the pivot to **agent-driven plotting** (design.md §2). The v1 codebase lives on
 `archive/codebase`; its UI-free data core is restored in M0 rather than rewritten.
 
-Core rule (unchanged): **UI-free core first, Panel app is a thin layer on top.**
+Core rule (unchanged): **UI-free core first; hub, worker, SPA, and sidecar are thin
+layers on top.**
 
 ## M0 — Scaffold + restore data core (1 day) ✅ done
 - New uv project (deps per design §9); package layout `better_mad/{core,app}`,
@@ -99,50 +100,66 @@ The new engine; fully headless and pytest-covered.
      inert (an overlay's toolbar is the union of its children's — apply per leaf).
   R1 (pty Terminal widget) closed 2026-11-02 without a spike — the chat-panel
   re-scope (M3) removed the terminal from v2 entirely.
+- **Superseded 2026-11-02 (frontend pivot):** the Panel app layer (`app/preview.py`,
+  `app/server.py`) is replaced in M3 by the SPA + hub + worker architecture
+  (design §5, §9). Retired with it: the pickle transport and its fixes (opts
+  capture/re-apply, DynamicMap materialization — static-raster limitation gone).
+  Everything headless (loader, workspace, runner semantics, SDK public API) carries
+  over. Panel-era lessons are archived in `sessions/2026-08-17-*.md` and git history.
 
-## M3 — Full shell: chat panel, editor, files panel (3–4 days)
+## M3 — Full shell: SPA, live-document worker, hub, chat (8–10 days)
 
-**2026-11-02 re-scope:** the left pane is now an **embedded pi chat panel** (design
-§9.1) instead of a pty terminal — the terminal moves to future work (design §11.2).
-Reference implementation: the pwb project (`~/pwb` — Fastify chat transport + pi SDK
-`AgentSession` + manager with busy/stop/watchdog). Split into small steps:
+**2026-11-02 re-scope (2nd):** Panel dropped after an honest re-evaluation — look &
+feel capped, 15+ framework gotchas, static rasters. New architecture per design §9:
+**React/TS SPA + FastAPI hub + live bokeh-server render worker + Node chat sidecar**.
+The headless core survives untouched. Steps are ordered by risk (worker first):
 
-- **M3.1 — Node chat sidecar** (`sidecar/`, TypeScript): pi SDK `AgentSession` behind
-  pwb's chat contract — `GET /events` (SSE + heartbeat: `text_delta`, `agent_start/end`,
-  `tool_execution_start/end`, `stopped`, `reset`, `error`), `POST /send` (202/busy-409),
-  `POST /stop` (`session.abort()`), `POST /new`, `GET /history`, `GET /health`.
-  Session: `cwd = workspace` (argv), built-in file tools **on** (they are the protocol),
-  context files **on** (`AGENTS.md` auto-loads), no extensions/templates/themes,
-  sessions at `workspace/.chat/` (`SessionManager`, resume recent on boot), watchdog
-  abort on hung provider calls (pwb: 5 min). Model: `--model provider/model` arg
-  resolved via `ModelRuntime` against `~/.pi/agent`; default = pi default.
-  *Exit:* run the sidecar against a fixture workspace; `curl` the endpoints; a
-  "write a hello plot.py" prompt produces the file; SSE streams text + tool events.
-- **M3.2 — Sidecar lifecycle in core** (`core/agent.py`, headless + pytest): pick a
-  free localhost port, spawn `node sidecar/dist/…`, poll `/health`, expose base URL;
-  clean teardown; restart-once-on-crash then degrade. Tests run against the real
-  sidecar when node + deps exist (skipif otherwise) plus a stub-server path for CI.
-  *Exit:* pytest spins workspace + sidecar → health green → shutdown clean; kill -9
-  the sidecar → restart → health green again.
-- **M3.3 — Chat pane in the app** (`app/chat.py`): `pn.chat` (ChatFeed/ChatAreaInput)
-  in the left column. A daemon SSE-reader thread pushes events into `queue.Queue`;
-  the existing `tick()` drains them (thread rules per AGENTS.md — never touch widgets
-  from the reader thread; `tick()` must not raise; catch `queue.Empty` first).
-  Streaming deltas into the live bubble, tool notes ("⚙ name"), busy state disabling
-  input, Stop → `/stop`, New chat → `/new` + clear transcript, history replay on pane
-  init (`/history`), sidecar-down → banner with retry. Add `httpx` dep.
-  *Exit:* type "scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ" → agent
-  writes `plot.py` → watcher runs → preview updates. **The full loop in one window.**
-- **M3.4 — Code view** (as originally planned): center **Preview ⟷ Code** toggle;
-  editor bound to `plot.py` (Ctrl+S + debounced auto-save); external-change policy
-  (clean → silent reload; dirty → Reload/Overwrite banner); collapsed Output drawer
-  with last run's stdout/stderr.
-- **M3.5 — Files panel + resizable columns** (as originally planned): right panel
-  file cards with column lists + click-to-copy sanitized names, import settings block
-  (delimiter/sentinels/re-parse), close-file confirm when referenced; drag-resizable
-  columns with persisted widths (CSS-variable mechanism from v1).
-- **Exit (M3):** import → chat (or hand-edit) → preview, all three panels functional
-  at 1920×1080; sidecar crash degrades to a banner without touching preview/editor.
+- **M3.1 — Render worker** (`better_mad/worker/`, headless + pytest): programmatic
+  `bokeh.server.Server`, single shared-session document, control API via
+  `extra_patterns` (`POST /run`, `GET /health`, `GET /doc.json`). `run` executes
+  `plot.py` in-process via `better_mad.sdk` (fresh namespace per run) on the IOLoop;
+  `bm.show()` attaches to the document; eager render → invalid opts raise at run time
+  → clean error result, document keeps last good roots. Watchdog kill on hang
+  (default 60 s). Sizing: fit-to-container policies via in-process opts hook.
+  *De-risked:* smoke test 2026-11-02 — 500k-pt datashaded DynamicMap renders
+  in-process, attaches to a doc with `RangeXYCallback`/`PlotSizeCallback` (zoom →
+  re-rasterize works).
+  *Exit:* pytest spawns worker → run good script → `doc.json` contains the figure →
+  run broken script → error result + last good roots intact → timeout → worker killed.
+- **M3.2 — Hub backend** (`better_mad/hub/`, FastAPI + uvicorn, headless + pytest):
+  workspace/files/import endpoints, `plot.py` get/put, `POST /run`, `GET /status`,
+  `GET /events` (SSE: run results, worker lifecycle, embed epoch),
+  `GET /plot/embed` (worker URL + session id), chat proxy `/api/chat/*` → sidecar,
+  serve `web/dist`. Worker lifecycle: spawn (free port), health-poll, restart-once
+  with **doc-snapshot restore** (no auto re-run after failure-restart), teardown.
+  Same lifecycle for the chat sidecar.
+  *Exit:* pytest drives hub end-to-end headlessly (import → run → SSE events →
+  embed info); kill -9 worker → restart → snapshot restored → event on SSE.
+- **M3.3 — Node chat sidecar** (`sidecar/`, TypeScript; unchanged from the
+  2026-11-02 chat decision): pi SDK `AgentSession` behind pwb's chat contract
+  (`/events` SSE, `/send`, `/stop`, `/new`, `/history`, `/health`); cwd = workspace,
+  built-in file tools on, context files on (AGENTS.md), sessions in
+  `workspace/.chat/`, watchdog, `--model provider/model` via `ModelRuntime`.
+  *Exit:* sidecar against a fixture workspace; curl endpoints; "write a hello
+  plot.py" prompt produces the file; SSE streams text + tool events.
+- **M3.4 — SPA shell** (`web/`, React + TS + Vite, pwb dev-proxy pattern): three-pane
+  layout (chat | plot/code | files) with drag-resize + persisted widths; header
+  (workspace, Run, auto-run, status, model); plot pane embeds the live document via
+  `bokeh.embed.server_document` (re-embed on worker restart / embed-epoch change);
+  Code view with CodeMirror 6 bound to `plot.py` (Ctrl+S + debounced auto-save,
+  external-change policy, Output drawer); chat pane (React port of pwb's client:
+  streaming, tool notes, busy/stop/new, history replay); error/staleness/empty
+  states per UX §6/§9.
+  *Exit:* type "scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ" in chat →
+  agent writes `plot.py` → watcher runs → live plot appears → **zoom re-rasterizes**.
+  Full loop in one window; verified at 1920×1080.
+- **M3.5 — Files panel & polish**: file cards (columns, click-to-copy sanitized
+  names, min/max/NaN%), import settings (delimiter/sentinels/re-parse), close-file
+  confirm when referenced; empty/first-launch states; dark theme.
+  *Exit:* import → wrong-parse → re-parse flow works end-to-end in the UI.
+- **Exit (M3):** import → chat (or hand-edit) → live preview with re-aggregation on
+  zoom, all three panels functional at 1920×1080; worker/sidecar crashes degrade to
+  banners without touching the rest.
 
 ## M4 — Agent skills & end-to-end validation (2–3 days)
 - Author the workspace `AGENTS.md`: SDK reference, hard rules, and complete runnable
@@ -166,22 +183,25 @@ Reference implementation: the pwb project (`~/pwb` — Fastify chat transport + 
   session persistence, selection→CSV, pty terminal pane for non-pi harnesses.
 
 ## Risks & spikes
-- **R1 Node sidecar lifecycle** (re-scoped 2026-11-02 from the pty-terminal spike —
-  dropped): spawn/health/crash-restart and port handling are ours to own, but the
-  transport and manager semantics are lifted from pwb's proven code (`manager.ts`,
-  `sessions.ts`, `chat.ts`). Node ≥ 20 becomes a runtime requirement; the app must
-  degrade to a banner when it is missing.
-- **R1b pn.chat streaming from a background thread** — pn.chat widgets are Panel
-  objects with the usual threading rules; stream via the established queue + `tick()`
-  drain only (never from the SSE reader thread), and `tick()` must never raise.
-- **R2 HoloViews pickling** across the subprocess boundary — ⚠ Elements/Curve
-  pickle fine, but **DynamicMaps don't** (rasterize/datashade closures); the SDK
-  materializes them to static frames (M2 fix). Overlays/Layouts of Elements OK.
+- **R1 Chat sidecar lifecycle** — spawn/health/crash-restart; transport and manager
+  semantics lifted from pwb's proven code. Node ≥ 20 runtime requirement; degrade to
+  a banner when missing.
+- **R2 ~~HoloViews pickling~~ RESOLVED 2026-11-02** — the pickle transport is gone;
+  figures live in the worker's document. New risk in its place: **worker state
+  pollution / leaks** from in-process exec — mitigations in design §5 (fresh
+  namespace, recycle on failure, run cap); escalate to per-run subprocesses only if
+  leaks prove real (that would forfeit live re-rasterization).
+- **R2b bokeh server embedding quirks** — single shared session id (all tabs see the
+  same doc), re-embed after worker restart, sizing of the embedded root in a CSS-
+  sized container (plain div — no Panel templates in the way, but verify fit
+  policies under BokehJS alone). Spike early in M3.4.
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
-  The chat agent writes `plot.py` via its file tools — same burst profile as before.
 - **R4 Model capability floor** — if small local models fail even with skills,
   mitigation is richer recipes/templates, not a product change (design §8). The
   chat panel makes this cheaper to test (direct iteration loop in-app).
+- **R5 SPA scope/async complexity** — a real frontend is more code than the 384-line
+  Panel layer; mitigated by the pwb pattern (thin fetch-and-render components, no
+  framework beyond React) and by keeping all data logic in the hub.
 
-## Rough total: ~2 weeks of focused work to end of M5 (v2 complete).
+## Rough total: ~3 weeks of focused work to end of M5 (v2 complete).

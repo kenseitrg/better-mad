@@ -13,6 +13,7 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 | 4 | Re-run trigger | **Auto-run on file change** (debounced, toggleable) + manual Run button |
 | 5 | Failure handling | Last good plot stays up with a staleness badge; error tail as a banner. No modals |
 | 6 | Chat turns | One in-flight turn; **Stop** aborts; **New chat** rotates the session (old history stays on disk). Agent actions surface as compact tool notes, never raw protocol noise |
+| 7 | Frontend | **Web-native React/TS SPA** + FastAPI hub; Panel dropped 2026-11-02 (look & feel, framework fights). Plot pane = **live bokeh document** (re-aggregates on zoom) |
 
 ---
 
@@ -35,6 +36,9 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 - All three columns are drag-resizable; widths persist per browser (localStorage),
   same mechanism as v1 (CSS variables, never inline widths).
+- The shell is a web-native SPA — full CSS control; the plot pane embeds the render
+  worker's live bokeh document, so plot interactions are real server-side updates,
+  not baked images.
 - The header status line always answers: *did my last change make it to the plot?*
   (running…, ✓ time+rows, ✗ error with one-line reason).
 
@@ -87,6 +91,9 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 ## 6. Preview behavior
 
+- **Live document**: zoom/pan/hover/selection are server-real. On datashaded plots
+  every range change re-rasterizes on the worker (~0.1–0.3 s) and streams back —
+  no re-run, no static-image feel.
 - Bokeh toolbar on every plot: pan, wheel zoom, box zoom, box select, lasso select,
   reset, save (Bokeh PNG).
 - The preview pane holds the **last good figure**:
@@ -139,6 +146,7 @@ except destructive confirms:
 | Agent overwrote dirty editor buffer | Reload/Overwrite banner (§5) |
 | Chat sidecar down / crashed | Banner in chat pane with retry; preview/editor/files unaffected |
 | Agent turn hung | Watchdog aborts after 5 min; "Stopped." marker; input re-enabled |
+| Worker hung / crashed | Hub kills + restarts it, restores last good plot from snapshot; banner; no auto re-run (no crash loops) |
 | First launch | Quick-start card (§2) |
 
 Modals only for: closing a referenced file, overwriting a dirty `plot.py`,
