@@ -146,7 +146,7 @@ except destructive confirms:
 | Agent overwrote dirty editor buffer | Reload/Overwrite banner (§5) |
 | Chat sidecar down / crashed | Banner in chat pane with retry; preview/editor/files unaffected |
 | Agent turn hung | Watchdog aborts after 5 min; "Stopped." marker; input re-enabled |
-| Worker hung / crashed | Hub kills + restarts it, restores last good plot from snapshot; banner; no auto re-run (no crash loops) |
+| Worker hung / crashed | Hub kills + restarts it, re-executes the last good script (known-safe); banner; the failing script is never auto-re-run (no crash loops) |
 | First launch | Quick-start card (§2) |
 
 Modals only for: closing a referenced file, overwriting a dirty `plot.py`,

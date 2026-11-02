@@ -134,10 +134,12 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   `GET /events` (SSE: run results, worker lifecycle, embed epoch),
   `GET /plot/embed` (worker URL + session id), chat proxy `/api/chat/*` → sidecar,
   serve `web/dist`. Worker lifecycle: spawn (free port), health-poll, restart-once
-  with **doc-snapshot restore** (no auto re-run after failure-restart), teardown.
+  by **re-executing the last-good script** (hub-stored; doc snapshots are structural
+  only — bokeh 3.x excludes ndarray buffers from `to_json`, so `from_json_string`
+  restore is impossible — M3.1 finding). The failing script is never auto-re-run.
   Same lifecycle for the chat sidecar.
   *Exit:* pytest drives hub end-to-end headlessly (import → run → SSE events →
-  embed info); kill -9 worker → restart → snapshot restored → event on SSE.
+  embed info); kill -9 worker → restart → last-good plot re-established → event on SSE.
 - **M3.3 — Node chat sidecar** (`sidecar/`, TypeScript; unchanged from the
   2026-11-02 chat decision): pi SDK `AgentSession` behind pwb's chat contract
   (`/events` SSE, `/send`, `/stop`, `/new`, `/history`, `/health`); cwd = workspace,

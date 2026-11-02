@@ -49,3 +49,38 @@ dissatisfaction with the original v2 plan and by the `~/pwb` reference project
 - Verify: bokeh fit-sizing under a plain CSS container (R2b); shared session id
   across tabs; equal-aspect behavior under the new container (was broken under
   Panel fit-sizing).
+
+## QC of M3.1 (2026-11-02, same day)
+
+Gates: 102 tests green, ruff/ty clean, PLAN exit line ticked. Verified live:
+spawned worker → datashaded run ok (2.7–3.0 s) → /doc.json carries the Image
+glyph → bokeh python client attaches to the shared session over the real
+websocket protocol. Findings:
+
+1. **Property patches don't re-rasterize — by design.** hv's `RangeXYCallback`
+   listens to the `rangesupdate` *event* (sent by WheelZoom/Pan tools), not to
+   range property changes. Any test that sets `x_range.start/end` client-side
+   will see nothing — not a bug.
+2. **bokeh 3.9.2 Python drops event payload values** (`RangesUpdate` has no
+   `event_values()` override server-side), so python-side synthetic events
+   arrive with x0/x1=None and crash hv's `_process_msg`. BokehJS (TypeScript)
+   DOES serialize the values (`get event_values()` in the bundle) — the real
+   browser→server path is unaffected. Synthetic-event tests must populate
+   values at the handler, not rely on the wire round-trip.
+3. **Panel is imported transitively** by hv's server callbacks
+   (`panel.io.server`/`state` in the stack) — harmless but present in every
+   worker traceback; don't be surprised by panel frames.
+4. **Open — needs a real browser check (10 s):** the debounced
+   `process_on_event` task is scheduled by panel's executor via a plain
+   `ensure_future` (no session-lock wrap) in the main-thread context; whether
+   the real websocket-driven flow wraps it with the session lock (and thus
+   re-rasterizes + pushes) could not be settled statically. If zoom does NOT
+   re-rasterize in the browser, suspect the hv 1.23 / panel 1.9.3 / bokeh
+   3.9.2 combo's lock plumbing: fix directions are (a) pin bokeh 3.8.x / a
+   compatible panel, (b) monkeypatch hv `Callback.process_on_event` with
+   panel's `with_lock` in the worker boot, or (c) route stream updates through
+   `session.with_document_locked` ourselves.
+
+Manual test artifact: `scripts/manual_worker_demo.py` (demo workspace + spawned
+worker + `viewer.html` embed via `server_session` — the exact mechanism the
+SPA will use).

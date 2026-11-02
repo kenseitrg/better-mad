@@ -135,9 +135,10 @@ sequenceDiagram
 Failure branch of step 3: if `plot.py` raises, the run fails **inside the worker** —
 the worker survives, the document keeps its last good roots (staleness badge) and the
 error tail renders as a banner (§5, UX §6). If the script hangs or dies fatally, the
-watchdog kills the worker; the hub restarts it, **restores the last good document
-snapshot**, and does not auto re-run (no crash loops). No write to `plot.py` happens
-on failure — only the user or the agent edits the script.
+watchdog kills the worker; the hub restarts it, **re-executes the last-good
+script** (hub-stored, known-safe), and never auto-re-runs the failing script
+(no crash loops). No write to `plot.py` happens on failure — only the user or
+the agent edits the script.
 
 ### 4.2 File ledger
 
@@ -194,9 +195,11 @@ bm.show(pts)  # attaches the figure to the worker's live document
   (default 60 s, configurable) kills the worker on hangs.
 - **Lifecycle & failure semantics** (owned by the hub, §9): script exception → error
   result, document untouched (last good roots + staleness badge). Fatal/hang → kill,
-  restart worker, restore last good snapshot, **no auto re-run** (a script that kills
-  the worker must not crash-loop). Restart-after-failure counts are reported in the
-  status line.
+  restart worker, **re-execute the last-good script** (kept by the hub — it is known-good,
+  so no crash loop; the failing script is never auto-re-run). Restoring from a
+  document snapshot is *not* possible in bokeh 3.x: `serialize_json(doc.to_json())`
+  is structural only — ndarray buffers stay out of the JSON, so it can't be
+  `from_json_string`-restored; the snapshot serves debugging/inspection instead.
 - **Isolation trade-off** (accepted): in-process exec loses per-run OS isolation — a
   script can pollute module/global state or leak memory. Mitigations: fresh namespace
   per run, recycle the worker after runs that raised, hard cap on consecutive runs
