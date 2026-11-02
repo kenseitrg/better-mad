@@ -126,6 +126,9 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   re-rasterize works).
   *Exit:* pytest spawns worker → run good script → `doc.json` contains the figure →
   run broken script → error result + last good roots intact → timeout → worker killed.
+  ✔ done (2026-11-02): 8 worker tests (in-process + spawned subprocess), 102-suite green;
+  `/doc.json` is structural only (bokeh 3.x keeps buffers out of `to_json` — not
+  `from_json_string`-restorable; hub restore = re-run last-good script per §4.4 fallback).
 - **M3.2 — Hub backend** (`better_mad/hub/`, FastAPI + uvicorn, headless + pytest):
   workspace/files/import endpoints, `plot.py` get/put, `POST /run`, `GET /status`,
   `GET /events` (SSE: run results, worker lifecycle, embed epoch),
