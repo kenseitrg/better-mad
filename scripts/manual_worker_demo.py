@@ -32,18 +32,20 @@ from better_mad.core.workspace import create_workspace
 from better_mad.worker.lifecycle import start_worker
 
 REPO = Path(__file__).resolve().parent.parent
-FIXTURE = REPO / "tests" / "fixtures" / "sample_csv_nulls.csv"
+DEFAULT_DATA = REPO / "data" / "14_01_post_stack_attr_after_scac_all"
 
-PLOT = '''
+
+def _plot_script(dataset: str) -> str:
+    return f'''
 import holoviews as hv
 from holoviews.operation.datashader import rasterize
 import datashader as ds
 import better_mad.sdk as bm
 
-df = bm.data("sample_csv_nulls")
-pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_HILBSTATIC"])
-rasterized = rasterize(pts, aggregator=ds.mean("TR_HILBSTATIC"), cnorm="eq_hist")
-print(f"rows: {len(df)}")
+df = bm.data("{dataset}")
+pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_DOMFREQ"])
+rasterized = rasterize(pts, aggregator=ds.mean("TR_DOMFREQ"), cnorm="eq_hist")
+print(f"rows: {{len(df)}}")
 bm.show(rasterized.opts(cmap="fire", colorbar=True, tools=["hover"]))
 '''
 
@@ -56,17 +58,20 @@ def _free_port() -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data", type=Path, default=DEFAULT_DATA,
+                        help="tabular file to load (default: the 121 MB post-stack sample)")
     parser.add_argument("--keep", action="store_true", help="keep temp workspace on exit")
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
     tmp = tempfile.mkdtemp(prefix="bm-worker-demo-")
     ws = create_workspace(Path(tmp))
-    ds = ws.add_file(str(FIXTURE))
+    print(f"loading {args.data.name} (first parse ~13 s, cached after)…")
+    ds = ws.add_file(str(args.data))
     print(f"workspace: {tmp}")
     print(f"loaded {ds.name}: {ds.df.shape[0]} rows x {ds.df.shape[1]} cols")
 
-    ws.path.joinpath("plot.py").write_text(PLOT)
+    ws.path.joinpath("plot.py").write_text(_plot_script(ds.name))
 
     # Static server for the viewer page: the embed must be served from a real
     # HTTP origin — file:// pages send `Origin: null`, which bokeh's websocket
