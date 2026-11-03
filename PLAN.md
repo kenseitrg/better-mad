@@ -126,9 +126,16 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   re-rasterize works).
   *Exit:* pytest spawns worker → run good script → `doc.json` contains the figure →
   run broken script → error result + last good roots intact → timeout → worker killed.
-  ✔ done (2026-11-02): 8 worker tests (in-process + spawned subprocess), 102-suite green;
-  `/doc.json` is structural only (bokeh 3.x keeps buffers out of `to_json` — not
-  `from_json_string`-restorable; hub restore = re-run last-good script per §4.4 fallback).
+  ✔ done + QC-verified (2026-11-02/03): 10 worker tests / 104-suite green, ruff/ty clean.
+  Live-verified on the real 121 MB / 708k-row sample (datashaded run ≈3 s incl.
+  attach) and **in-browser**: figure fills the container (worker applies
+  `stretch_both` + clears zero width/height) and **zoom re-rasterizes** — the
+  M2 static-raster limitation is gone (fix: `.lock=True` on hv's
+  `process_on_event/-_on_change`, regression-tested; see session log). Worker
+  accepts `--allow-websocket-origin` (a non-empty list REPLACES bokeh's default
+  self-origin allowlist — the hub must pass its own origin). `/doc.json` is
+  structural only (bokeh 3.x keeps buffers out of `to_json`; hub restore =
+  re-run last-good script). Manual demo: `scripts/manual_worker_demo.py`.
 - **M3.2 — Hub backend** (`better_mad/hub/`, FastAPI + uvicorn, headless + pytest):
   workspace/files/import endpoints, `plot.py` get/put, `POST /run`, `GET /status`,
   `GET /events` (SSE: run results, worker lifecycle, embed epoch),

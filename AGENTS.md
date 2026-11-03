@@ -24,10 +24,9 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M2 done** — headless engine + minimal preview app live. Next step:
-  milestone **M3** — full shell as **React SPA + FastAPI hub + live bokeh-server
-  render worker + Node chat sidecar** (PLAN.md; two re-scopes on 2026-11-02: pty
-  terminal → pi chat panel, then Panel → web-native SPA with live document).
+- Phase: **M3 in progress — M3.1 done** (render worker; live-doc verified in
+  browser: zoom re-rasterizes on the 708k-row sample). Next: **M3.2 hub
+  backend** — see `HANDOFF-M3.2-hub.md` at the repo root.
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -66,11 +65,13 @@ Two 121 MB files, ~708k rows × 9 columns. Know these before touching the loader
 
 ## Architecture rule
 **UI-free core.** Loading, workspace model, script-execution semantics, SDK, manifest
-generation, and sidecar/worker lifecycle live in `better_mad/core` and must be
-headless and pytest-covered. Thin layers over the core: `better_mad/worker/` (bokeh
-server render worker), `better_mad/hub/` (FastAPI transport), `web/` (React SPA),
-`sidecar/` (Node pi-chat host). Don't let UI concerns leak into core — no framework
-imports in `core/`.
+generation live in `better_mad/core` and must be headless and pytest-covered — no
+framework imports in `core/`. Worker process lifecycle lives in `better_mad/worker/`
+(headless, pytest-covered; it necessarily imports bokeh), sidecar lifecycle will
+land beside the sidecar host in M3.3. Thin layers over the core:
+`better_mad/worker/` (bokeh server render worker), `better_mad/hub/` (FastAPI
+transport), `web/` (React SPA), `sidecar/` (Node pi-chat host). Don't let UI
+concerns leak into core.
 
 ## Working conventions
 - Python ≥3.11 (system has 3.14), manage with `uv`; lint/format `ruff`, types `ty`.
