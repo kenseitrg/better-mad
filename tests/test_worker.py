@@ -20,14 +20,17 @@ completion and the awaited document-lock swap, which is not deterministically
 reachable over HTTP.
 """
 
+import hashlib
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from bokeh.events import RangesUpdate
 
 from better_mad.core.workspace import Workspace, create_workspace
 from better_mad.worker import WorkerHandle, boot_worker, start_worker
@@ -182,6 +185,52 @@ def test_dynamic_map_stays_dynamic(inproc) -> None:
     # kept plot reference: its range callbacks re-rasterize on zoom (trap T6)
     assert len(handle.state.last_plot.callbacks) > 0
     assert handle.state.ever_shown
+
+
+def test_zoom_event_re_rasterizes(inproc) -> None:
+    """A ``rangesupdate`` event (what WheelZoom/Pan tools send) re-aggregates.
+
+    Regression for the hv/panel lock trap (QC 2026-11-03): without
+    ``_patch_hv_callback_locking``, hv's deferred ``process_on_event`` is
+    scheduled nolock, the first model mutation raises ``_pending_writes
+    should be non-None``, and the raster never updates. The event is fired
+    server-side with x AND y values — bokeh's python serializer drops
+    ``RangesUpdate`` values, so the wire round-trip can't be tested here.
+    """
+    handle, ws = inproc
+    result = _post_run(handle, {"script": _write(ws, RASTERIZE_SCRIPT)})
+    assert result["status"] == "ok", result
+
+    doc = handle.state.session.document
+    fig = doc.roots[0]
+    rend = [
+        r for r in fig.renderers
+        if type(r.glyph).__name__ == "Image" and "image" in r.data_source.data
+    ]
+    src = rend[0].data_source
+
+    def raster_hash() -> str:
+        return hashlib.sha256(src.data["image"][0].tobytes()).hexdigest()
+
+    f0 = raster_hash()
+    xr, yr = fig.x_range, fig.y_range
+    event = RangesUpdate(
+        fig,
+        x0=xr.start + (xr.end - xr.start) * 0.4,
+        x1=xr.end - (xr.end - xr.start) * 0.4,
+        y0=yr.start + (yr.end - yr.start) * 0.4,
+        y1=yr.end - (yr.end - yr.start) * 0.4,
+    )
+    # fire on the worker's IOLoop thread — same dispatch bokeh's websocket
+    # patch handler uses (doc event callbacks -> hv on_event)
+    handle.server.io_loop.add_callback(lambda: fig._trigger_event(event))
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        if raster_hash() != f0:
+            return  # re-aggregated + pushed under the session lock
+    pytest.fail("raster did not re-render within 10 s of the rangesupdate event")
 
 
 # --- scenario 3: error run keeps last good ----------------------------------

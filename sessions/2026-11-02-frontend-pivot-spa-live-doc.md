@@ -70,16 +70,21 @@ websocket protocol. Findings:
 3. **Panel is imported transitively** by hv's server callbacks
    (`panel.io.server`/`state` in the stack) — harmless but present in every
    worker traceback; don't be surprised by panel frames.
-4. **Open — needs a real browser check (10 s):** the debounced
-   `process_on_event` task is scheduled by panel's executor via a plain
-   `ensure_future` (no session-lock wrap) in the main-thread context; whether
-   the real websocket-driven flow wraps it with the session lock (and thus
-   re-rasterizes + pushes) could not be settled statically. If zoom does NOT
-   re-rasterize in the browser, suspect the hv 1.23 / panel 1.9.3 / bokeh
-   3.9.2 combo's lock plumbing: fix directions are (a) pin bokeh 3.8.x / a
-   compatible panel, (b) monkeypatch hv `Callback.process_on_event` with
-   panel's `with_lock` in the worker boot, or (c) route stream updates through
-   `session.with_document_locked` ourselves.
+4. **RESOLVED 2026-11-03 (user-confirmed broken, then fixed):** zoom did not
+   re-rasterize in the browser. Root cause: hv schedules its deferred stream
+   processors (`Callback.process_on_event/process_on_change`) through panel's
+   `async_execute`, which checks `getattr(func, "lock", False)`; without the
+   marker they are scheduled **nolock**, bokeh's session skips the
+   `with_document_locked` wrap, `_pending_writes` stays None, and the first
+   model mutation inside `Stream.trigger` raises — swallowed by panel's
+   exception handler. Fix: `_patch_hv_callback_locking()` in worker boot sets
+   `.lock = True` on both processors (the same marker `panel.io.document
+   .with_lock` sets for panel's own callbacks). Regression test:
+   `test_zoom_event_re_rasterizes` fires `RangesUpdate` server-side (x+y
+   values — bokeh's *python* serializer drops them; BokehJS sends them) and
+   asserts the raster hash changes. Upstream hv main restructured this area
+   (`_schedule_event` via `doc.add_next_tick_callback`) but does not set the
+   marker either — revisit on the next hv upgrade.
 
 Manual test artifact: `scripts/manual_worker_demo.py` (demo workspace + spawned
 worker + `viewer.html` embed via `server_session` — the exact mechanism the

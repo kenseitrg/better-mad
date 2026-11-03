@@ -126,6 +126,30 @@ class WorkerHandle:
             self.server.io_loop.add_callback(self.server.io_loop.stop)
 
 
+def _patch_hv_callback_locking() -> None:
+    """Mark hv's deferred stream processors as lock-taking (fixes zoom re-render).
+
+    Root cause (verified 2026-11-03, user-confirmed in-browser): hv schedules
+    `Callback.process_on_event/process_on_change` through panel's
+    `async_execute`, which checks `getattr(func, "lock", False)`: without the
+    marker the callback is scheduled **nolock**, so bokeh's session does not
+    wrap it in `with_document_locked`, `_pending_writes` stays None, and the
+    first model mutation inside `Stream.trigger` raises
+    ``RuntimeError: _pending_writes should be non-None…`` — swallowed by
+    panel's exception handler, so `rangesupdate` events (wheel zoom) never
+    re-rasterize. With `.lock = True` panel schedules via
+    ``doc.add_next_tick_callback`` → session-locked → pushes work.
+
+    Exactly what panel does for its own server callbacks
+    (``panel.io.document.with_lock`` sets the same marker); idempotent and
+    process-wide — the worker is a dedicated process, so this is safe.
+    """
+    from holoviews.plotting.bokeh.callbacks import Callback
+
+    Callback.process_on_event.lock = True  # ty: ignore[unresolved-attribute]
+    Callback.process_on_change.lock = True  # ty: ignore[unresolved-attribute]
+
+
 def boot_worker(
     data_dir: Path | str,
     *,
@@ -152,6 +176,8 @@ def boot_worker(
     pages (``Origin: null``) are always rejected.
     """
     os.environ[ENV_DATA_DIR] = str(Path(data_dir).resolve())
+
+    _patch_hv_callback_locking()
 
     state = WorkerState(session_id=session_id)
     srv = Server(
