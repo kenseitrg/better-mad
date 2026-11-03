@@ -203,6 +203,31 @@ async def execute_run(
         state.running = False
 
 
+def _apply_fit_sizing(root: Any) -> None:
+    """Fit the attached figure to its embedding container (design §7).
+
+    The v1 ``fit_container_hook`` equivalent (``archive/codebase``,
+    app/layers.py) — now applied by the worker at attach time instead of via
+    per-element opts hooks. Scripts are told (skills) not to set width/height;
+    zero values from copy-pasted snippets are cleared rather than trusted.
+    """
+    from bokeh.models import Plot
+
+    def apply(model: Any) -> None:
+        model.sizing_mode = "stretch_both"
+        if getattr(model, "width", None) == 0:
+            model.width = None
+        if getattr(model, "height", None) == 0:
+            model.height = None
+
+    if isinstance(root, Plot):
+        apply(root)
+    else:  # Layout/NdLayout state: bokeh Column/Row — stretch it and its plots
+        apply(root)
+        for plot_model in root.select({"type": Plot}):
+            apply(plot_model)
+
+
 async def _attach_last_plot(state: WorkerState, plot: Any) -> None:
     """Swap the shared document's roots to ``plot.state`` under the session lock.
 
@@ -213,6 +238,8 @@ async def _attach_last_plot(state: WorkerState, plot: Any) -> None:
     """
     assert state.session is not None
     session = state.session
+
+    _apply_fit_sizing(plot.state)  # before add_root: not yet in a doc → no patches
 
     def swap() -> None:
         doc = session.document

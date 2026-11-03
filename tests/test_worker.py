@@ -152,6 +152,23 @@ def test_good_run_populates_and_replaces_roots(inproc) -> None:
     assert "Line" in sig_b and "Scatter" not in sig_b  # Curve, not a stale second root
 
 
+def test_attached_figure_fits_container(inproc) -> None:
+    """The worker forces stretch_both sizing and clears zero width/height —
+    the plot must fill the embedding container, not render as a thin
+    fixed-width strip (v1 fit_container_hook equivalent; QC 2026-11-03)."""
+    handle, ws = inproc
+    script = POINTS_SCRIPT.replace(
+        "pts.opts(color='TR_DOMFREQ', cmap='viridis', size=2)",
+        "pts.opts(color='TR_DOMFREQ', cmap='viridis', size=2, width=0, height=0)",
+    )
+    result = _post_run(handle, {"script": _write(ws, script)})
+    assert result["status"] == "ok", result
+
+    root = handle.state.session.document.roots[0]
+    assert root.sizing_mode == "stretch_both"
+    assert root.width != 0 and root.height != 0
+
+
 # --- scenario 2: DynamicMaps stay dynamic -----------------------------------
 
 def test_dynamic_map_stays_dynamic(inproc) -> None:

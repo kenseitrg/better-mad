@@ -44,7 +44,7 @@ df = bm.data("sample_csv_nulls")
 pts = hv.Points(df, ["XCORD_MIDPT", "YCORD_MIDPT"], vdims=["TR_HILBSTATIC"])
 rasterized = rasterize(pts, aggregator=ds.mean("TR_HILBSTATIC"), cnorm="eq_hist")
 print(f"rows: {len(df)}")
-bm.show(rasterized.opts(cmap="fire", colorbar=True, width=0, height=0, tools=["hover"]))
+bm.show(rasterized.opts(cmap="fire", colorbar=True, tools=["hover"]))
 '''
 
 
