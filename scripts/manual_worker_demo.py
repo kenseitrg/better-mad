@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import tempfile
+import threading
 import time
 import webbrowser
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from bokeh.core.types import ID
 from bokeh.embed import server_session
 
 from better_mad.core.workspace import create_workspace
@@ -43,6 +48,12 @@ bm.show(rasterized.opts(cmap="fire", colorbar=True, width=0, height=0, tools=["h
 '''
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--keep", action="store_true", help="keep temp workspace on exit")
@@ -57,7 +68,21 @@ def main() -> None:
 
     ws.path.joinpath("plot.py").write_text(PLOT)
 
-    handle = start_worker(ws.path / ".data", stderr_log=Path(tmp) / "worker.log")
+    # Static server for the viewer page: the embed must be served from a real
+    # HTTP origin — file:// pages send `Origin: null`, which bokeh's websocket
+    # allowlist always rejects. The worker gets this origin allowlisted.
+    static_port = _free_port()
+    static = ThreadingHTTPServer(
+        ("127.0.0.1", static_port),
+        partial(SimpleHTTPRequestHandler, directory=tmp),
+    )
+    threading.Thread(target=static.serve_forever, daemon=True).start()
+
+    handle = start_worker(
+        ws.path / ".data",
+        allow_websocket_origin=[f"127.0.0.1:{static_port}"],
+        stderr_log=Path(tmp) / "worker.log",
+    )
     try:
         print(f"worker: {handle.base_url} (session {handle.session_id!r}, pid via /health)")
         print(f"health: {json.dumps(handle.health())}")
@@ -73,7 +98,9 @@ def main() -> None:
         print(f"doc.json: {len(doc)} chars | datashader Image glyph present: {has_image}")
 
         tag = server_session(
-            model=None, url=f"{handle.base_url}/bm", session_id=handle.session_id
+            model=None,
+            url=f"{handle.base_url}/bm",
+            session_id=ID(handle.session_id),
         )
         viewer = Path(tmp) / "viewer.html"
         viewer.write_text(
@@ -85,10 +112,11 @@ def main() -> None:
             + tag
             + "</div></body></html>"
         )
-        print(f"\nviewer: {viewer}")
+        viewer_url = f"http://127.0.0.1:{static_port}/viewer.html"
+        print(f"\nviewer: {viewer_url}")
         print("open it in a browser — zoom in: the raster must RE-RASTERIZE (get sharper)")
         if not args.no_browser:
-            webbrowser.open(viewer.as_uri())
+            webbrowser.open(viewer_url)
 
         print("\nalso try, in another terminal:")
         print(f"  curl -s {handle.base_url}/health")
@@ -101,6 +129,7 @@ def main() -> None:
         pass
     finally:
         handle.stop()
+        static.shutdown()
         print("worker stopped")
         if not args.keep:
             import shutil

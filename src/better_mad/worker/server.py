@@ -26,10 +26,11 @@ import os
 import subprocess
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from bokeh.core.types import ID
 from bokeh.server.server import Server
@@ -130,6 +131,7 @@ def boot_worker(
     *,
     port: int = 0,
     session_id: str = DEFAULT_SESSION_ID,
+    extra_websocket_origins: Sequence[str] | None = None,
     ready: Callable[[WorkerHandle], None] | None = None,
 ) -> WorkerHandle:
     """Build the bokeh Server + shared session + control API and serve (blocks).
@@ -138,6 +140,16 @@ def boot_worker(
     reads it). ``ready`` fires with the handle just before the IOLoop starts —
     the process entry point uses it to announce the ephemeral port. Blocks
     until :meth:`WorkerHandle.stop` or process exit.
+
+    ``extra_websocket_origins``: additional origins (``host:port`` or full
+    URLs, scheme stripped) allowed to open the live-document websocket —
+    needed when the embedding page is served from another origin (the M3.2
+    hub/SPA, or the manual demo's static server). Bokeh's ``Server`` takes
+    these as ``allow_websocket_origin``; note a **non-empty list REPLACES
+    bokeh's default self-origin allowlist** (``create_hosts_allowlist`` only
+    adds ``localhost:<port>`` when the list is empty) — include the worker's
+    own origin explicitly if anything should embed from it. ``file://``
+    pages (``Origin: null``) are always rejected.
     """
     os.environ[ENV_DATA_DIR] = str(Path(data_dir).resolve())
 
@@ -148,6 +160,7 @@ def boot_worker(
         address="127.0.0.1",
         extra_patterns=build_control_handlers(state),
         unused_session_lifetime_milliseconds=SESSION_LIFETIME_MS,
+        allow_websocket_origin=_normalize_origins(extra_websocket_origins),
     )
     app_ctx = srv._tornado._applications["/bm"]
     srv.start()  # install background tasks; the loop itself starts below
@@ -173,6 +186,17 @@ def boot_worker(
         ready(handle)
     srv.io_loop.start()  # blocks; stop() unwinds it
     return handle
+
+
+def _normalize_origins(origins: Sequence[str] | None) -> list[str]:
+    """Allowlist entries as ``host:port`` netlocs (bokeh compares netlocs,
+    not full URLs — ``ws.py`` extracts ``urlparse(origin).netloc``)."""
+    out: list[str] = []
+    for o in origins or []:
+        netloc = urlsplit(o if "://" in o else f"//{o}").netloc.lower()
+        if netloc:
+            out.append(netloc)
+    return out
 
 
 __all__ = [

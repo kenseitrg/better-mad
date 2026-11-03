@@ -282,6 +282,10 @@ localhost; the hub owns every spawn):
   chat proxying (single origin — no CORS), and serves the built SPA. Endpoints:
   files/import · files list · plot.py get/put · run · status · events (SSE:
   run results, worker lifecycle, embed epoch) · plot/embed (worker URL + session id).
+  The hub spawns the worker with its own origin allowlisted
+  (`--allow-websocket-origin 127.0.0.1:<hub-port>`) — the SPA page comes from
+  the hub, not the worker, and bokeh checks websocket origins (a non-empty
+  allowlist **replaces** the default self-origin entries).
 - **Render worker** (`better_mad/worker/`): see §5. Headless, pytest-covered.
 - **Chat sidecar** (`sidecar/`, Node/TypeScript): see §9.1.
 - **SPA** (`web/`, React + TypeScript + Vite): three-pane shell (chat | plot/code |
