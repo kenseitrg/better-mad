@@ -24,9 +24,10 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M3 in progress — M3.1 done** (render worker; live-doc verified in
-  browser: zoom re-rasterizes on the 708k-row sample). Next: **M3.2 hub
-  backend** — see `HANDOFF-M3.2-hub.md` at the repo root.
+- Phase: **M3 in progress — M3.2 done** (hub backend; exit criteria verified in
+  pytest + live curl smoke incl. kill -9 restart with last-good replay; chat proxy
+  deferred to M3.3 — `/api/chat/*` reserved). Next: **M3.3 Node chat sidecar** —
+  see PLAN.md M3.3 (no handoff file yet at time of writing).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)

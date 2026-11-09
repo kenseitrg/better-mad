@@ -147,6 +147,13 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   Same lifecycle for the chat sidecar.
   *Exit:* pytest drives hub end-to-end headlessly (import → run → SSE events →
   embed info); kill -9 worker → restart → last-good plot re-established → event on SSE.
+  ✔ done (2026-11-09): `hub/app.py` + `hub/watcher.py` + `worker/manager.py`, CLI rewired
+  to the hub; 8 hub tests + full 112-suite green, ruff/ty clean; smoke-tested live via
+  curl (health/import/PUT→SSE run_result/embed URL family) incl. kill -9 → epoch 2 →
+  last-good replayed. Chat proxy deferred to M3.3 per handoff (`/api/chat/*` reserved
+  only). Deviation: hub tests drive SSE through a real uvicorn on an ephemeral port
+  (httpx `ASGITransport` buffers whole bodies — cannot read an infinite stream); REST
+  stays on ASGITransport per W6.
 - **M3.3 — Node chat sidecar** (`sidecar/`, TypeScript; unchanged from the
   2026-11-02 chat decision): pi SDK `AgentSession` behind pwb's chat contract
   (`/events` SSE, `/send`, `/stop`, `/new`, `/history`, `/health`); cwd = workspace,
