@@ -213,7 +213,12 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
 - **R2b bokeh server embedding quirks** — single shared session id (all tabs see the
   same doc), re-embed after worker restart, sizing of the embedded root in a CSS-
   sized container (plain div — no Panel templates in the way, but verify fit
-  policies under BokehJS alone). Spike early in M3.4.
+  policies under BokehJS alone). Spike early in M3.4. **Confirmed 2026-11-09
+  (M3.2 QA):** `autoload.js` replaces the script tag with a `div.bk-root` of
+  height:auto — `stretch_both` measures the *parent*, so the figure collapses
+  to a toolbar-height strip unless every div in the chain is forced to full
+  height (fix: the M3.1 `div{height:100vh !important}` pattern, applied in
+  `scripts/m32_qa_demo.py`; the SPA container must do the same).
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
 - **R4 Model capability floor** — if small local models fail even with skills,

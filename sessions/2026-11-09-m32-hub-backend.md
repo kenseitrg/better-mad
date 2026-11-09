@@ -82,6 +82,17 @@ handoff W10, deleted in a later cleanup step).
   `/api/plot/embed` URL family serves the bokeh app (`/bm` page, `/doc.json`
   has the Image glyph) → kill -9 worker → epoch 2 / restarts 1 / new port /
   last-good replayed (`runs: 1`, Image glyph back). Placeholder page at `/`.
+- **Manual QA (2026-11-09, user-driven, PASSED)** via
+  `scripts/m32_qa_demo.py` (committed): boots the real hub on the 121 MB /
+  708k-row sample + a `/demo` viewer page embedding the live session with
+  `bokeh.embed.server_session` (the M3.4 SPA mechanism). Verified in-browser:
+  map fills the viewport, zoom re-rasterizes, watcher auto-run updates the
+  live plot without reload, error runs keep last-good, kill -9 → restart +
+  last-good replay, API surface incl. import-with-sentinels. One finding,
+  fixed same day: **R2b confirmed** — the injected `div.bk-root` wrapper is
+  height:auto and `stretch_both` measures the parent, collapsing the figure
+  to a toolbar-height strip; fix = force the div chain to full height
+  (M3.1 pattern, now in the demo page CSS and noted in PLAN R2b for M3.4).
 
 ## Next
 
