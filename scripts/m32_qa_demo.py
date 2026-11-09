@@ -146,7 +146,13 @@ def main() -> int:
     print(f"script: {ws.script_path}  (edits auto-run)")
     print(f"events: curl -N http://127.0.0.1:{args.port}/api/events")
     print("\nCtrl+C to stop")
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")  # blocks
+    uvicorn.run(  # blocks; SSE clients can't stall shutdown (see cli.py note)
+        app,
+        host="127.0.0.1",
+        port=args.port,
+        log_level="info",
+        timeout_graceful_shutdown=5,
+    )
     return 0
 
 

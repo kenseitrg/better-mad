@@ -35,8 +35,21 @@ def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
 
     calls: dict[str, object] = {}
 
-    def fake_run(app: object, *, host: str, port: int, log_level: str) -> None:
-        calls.update(app=app, host=host, port=port, log_level=log_level)
+    def fake_run(
+        app: object,
+        *,
+        host: str,
+        port: int,
+        log_level: str,
+        timeout_graceful_shutdown: int | None = None,
+    ) -> None:
+        calls.update(
+            app=app,
+            host=host,
+            port=port,
+            log_level=log_level,
+            tgs=timeout_graceful_shutdown,
+        )
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     ws_dir = tmp_path / "ws"
@@ -46,6 +59,8 @@ def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
     assert code == 0
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8050
+    # SSE clients must not be able to stall shutdown forever (M3.2 QA finding)
+    assert calls["tgs"] == 5
     app = cast(FastAPI, calls["app"])
     hub = app.state.hub
     assert hub.ws.path == ws_dir

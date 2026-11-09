@@ -78,7 +78,17 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     print(f"hub: http://127.0.0.1:{port}/")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")  # blocks
+    # SSE streams never end on their own — without a graceful-shutdown timeout
+    # an open /api/events client (a SPA tab) blocks Ctrl+C forever (found in
+    # M3.2 manual QA cleanup). After the timeout uvicorn force-closes sockets;
+    # the lifespan still stops the worker cleanly.
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=5,
+    )  # blocks
     return 0
 
 
