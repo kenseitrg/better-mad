@@ -22,15 +22,32 @@ def test_parser_files_and_port() -> None:
     assert args.port == 8050
 
 
-def test_main_delegates_to_serve_app(monkeypatch) -> None:
-    import better_mad.app.server as server_mod
-    from better_mad import cli
+def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
+    """CLI rewiring (M3.2): main() builds the hub app (workspace + worker
+    manager) and hands it to uvicorn; with ``uvicorn.run`` stubbed out, no
+    socket binds and no worker spawns — pure plumbing smoke test."""
+    from typing import cast
+
+    import uvicorn
+    from fastapi import FastAPI
+
+    import better_mad.cli as cli
 
     calls: dict[str, object] = {}
 
-    def fake_serve(files, port=5006, show=True, workspace=None):
-        calls.update(files=files, port=port, show=show, workspace=workspace)
+    def fake_run(app: object, *, host: str, port: int, log_level: str) -> None:
+        calls.update(app=app, host=host, port=port, log_level=log_level)
 
-    monkeypatch.setattr(server_mod, "serve_app", fake_serve)
-    assert cli.main(["a.txt", "--port", "8050", "--no-browser", "--workspace", "/tmp/ws"]) == 0
-    assert calls == {"files": ["a.txt"], "port": 8050, "show": False, "workspace": "/tmp/ws"}
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    ws_dir = tmp_path / "ws"
+    code = cli.main(
+        ["a.txt", "--port", "8050", "--no-browser", "--workspace", str(ws_dir)]
+    )
+    assert code == 0
+    assert calls["host"] == "127.0.0.1"
+    assert calls["port"] == 8050
+    app = cast(FastAPI, calls["app"])
+    hub = app.state.hub
+    assert hub.ws.path == ws_dir
+    assert hub.auto_run is True
+    assert hub.manager.epoch == 1  # lifespan never ran: worker not spawned

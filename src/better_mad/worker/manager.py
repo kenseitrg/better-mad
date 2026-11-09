@@ -306,7 +306,6 @@ class WorkerManager:
         old, self._handle = self._handle, None
         if old is not None:
             await asyncio.to_thread(old.stop)  # reaps the process, closes pipes
-        self._set_state("restarting")
 
         while True:
             self._prune_restart_times()
@@ -317,6 +316,9 @@ class WorkerManager:
             self._restart_times.append(time.monotonic())
             self._restarts += 1
             self._epoch += 1
+            # emitted AFTER the bump so the event already carries the epoch of
+            # the worker being spawned — "ready" then repeats that epoch
+            self._set_state("restarting")
             try:
                 handle = await self._spawn()
                 break
