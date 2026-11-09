@@ -13,6 +13,10 @@ dependencies = [
     "holoviews>=1.19",
     "panel>=1.5",
     "datashader>=0.16",
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+    "httpx>=0.28.1",
+    "python-multipart>=0.0.33",
 ]
 
 [project.scripts]
@@ -26,6 +30,7 @@ build-backend = "uv_build"
 dev = [
     "playwright>=1.62.0",
     "pytest>=8",
+    "pytest-asyncio>=1.4.1.post1",
     "ruff>=0.6",
     "ty>=0.0.1a15",
 ]
@@ -51,3 +56,8 @@ python-version = "3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+# Hub tests share one event loop for the whole session so a single spawned
+# render worker + manager can live across tests (spawn costs ~3–5 s).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
