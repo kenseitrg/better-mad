@@ -1,0 +1,77 @@
+{
+  "nextId": 7,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Read design/PLAN/session docs + existing SDK & tests",
+      "description": "Read design.md §5 and §9, PLAN.md M3.1/M3.2, sessions/2026-11-02-frontend-pivot-spa-live-doc.md, src/better_mad/sdk/__init__.py, tests/test_runner.py to extract the worker contract.",
+      "status": "completed",
+      "activeForm": "Reading design docs and existing code",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382477,
+      "updatedAt": 1793627026741
+    },
+    {
+      "id": "2",
+      "subject": "Implement worker server + shared session",
+      "description": "src/better_mad/worker/server.py: boot_worker() -> WorkerHandle, bokeh Server with /bm app, shared session, lifecycle. Commit \"M3.1: worker server + shared session\".",
+      "status": "completed",
+      "activeForm": "Implementing worker server",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382478,
+      "updatedAt": 1793628172320
+    },
+    {
+      "id": "3",
+      "subject": "Implement run executor + SDK attach transport",
+      "description": "src/better_mad/worker/executor.py (run_script, watchdog, result dataclass) + sdk._ATTACH transport per handoff §6. Commit \"M3.1: run executor + SDK attach transport\".",
+      "status": "completed",
+      "activeForm": "Implementing executor and SDK attach",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382479,
+      "updatedAt": 1793628172322
+    },
+    {
+      "id": "4",
+      "subject": "Implement control API handlers",
+      "description": "src/better_mad/worker/control.py: RunHandler (POST /run, busy 409), HealthHandler, DocJsonHandler wired via Server extra_patterns. Commit \"M3.1: control API handlers\".",
+      "status": "completed",
+      "activeForm": "Implementing control API",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382480,
+      "updatedAt": 1793628172324
+    },
+    {
+      "id": "5",
+      "subject": "Write tests/test_worker.py scenarios 1–5 (+6 if async runs)",
+      "description": "Per handoff §7: good run, dynamic map stays dynamic, error keeps last good, no-show error, timeout kills process, busy 409. Hard timeouts everywhere. Commit \"M3.1: tests\".",
+      "status": "completed",
+      "activeForm": "Writing worker tests",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382481,
+      "updatedAt": 1793628246268
+    },
+    {
+      "id": "6",
+      "subject": "Full suite + lint + types + live sanity + tick PLAN.md",
+      "description": "uv run pytest, ruff check, ty check all green; live sanity run against demo workspace asserting /doc.json contains an Image glyph; tick M3.1 exit line in PLAN.md; report files changed/test count/deviations.",
+      "status": "completed",
+      "activeForm": "Verifying definition of done",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1793626382483,
+      "updatedAt": 1793628536291
+    }
+  ]
+}
