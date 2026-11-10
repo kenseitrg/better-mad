@@ -161,6 +161,16 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   `workspace/.chat/`, watchdog, `--model provider/model` via `ModelRuntime`.
   *Exit:* sidecar against a fixture workspace; curl endpoints; "write a hello
   plot.py" prompt produces the file; SSE streams text + tool events.
+  ✔ done (2026-11-10): `sidecar/` (node:http, native-TS Node ≥22.18, zero deps
+  beyond the pi SDK; ChatManager lifted from pwb) + `hub/sidecar.py`
+  (SidecarManager: node gate, READY handshake, restart-once-then-down) + hub
+  `/api/chat/*` byte-passthrough proxy + CLI `--model`; 19 vitest (session-stubbed)
+  + 18 pytest (stub-sidecar fixture) green, full 130-suite green, ruff/ty clean.
+  Live smoke through the hub: hello-plot.py written via the write tool, 83
+  text_deltas + read/write tool events on SSE, history replay, new→reset,
+  busy-409, kill -9 → restart-once with session resume, SIGTERM clean shutdown.
+  Deviations: vitest ^3.2 (v4's native parser needs AVX2; this CPU is AVX1),
+  `skipLibCheck` in tsconfig (third-party .d.ts noise).
 - **M3.4 — SPA shell** (`web/`, React + TS + Vite, pwb dev-proxy pattern): three-pane
   layout (chat | plot/code | files) with drag-resize + persisted widths; header
   (workspace, Run, auto-run, status, model); plot pane embeds the live document via

@@ -24,11 +24,10 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M3 in progress — M3.2 done** (hub backend; exit criteria verified in
-  pytest + live curl smoke incl. kill -9 restart with last-good replay; chat proxy
-  deferred to M3.3 — `/api/chat/*` reserved). Next: **M3.3 Node chat sidecar** —
-  handoff ready: `HANDOFF-M3.3-sidecar.md` (sidecar + `hub/sidecar.py` + proxy;
-  decisions locked 2026-11-10: node:http, native-TS Node ≥22.18, manager in hub/).
+- Phase: **M3 in progress — M3.3 done** (chat sidecar + hub proxy; exit criteria
+  verified in vitest/pytest + live smoke: hello plot.py via chat, SSE text + tool
+  events, kill -9 restart, clean shutdown). Next: **M3.4 SPA shell** — three-pane
+  React/TS app (chat | plot/code | files); R2b sizing spike early per PLAN.md.
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -42,7 +41,8 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
 - Stack: **HoloViews + Datashader** rendered on a **live bokeh-server document** in
   an isolated render worker; **React/TS SPA** frontend; **FastAPI** hub; Node pi-chat
   sidecar; pandas; uv + ruff + ty (Python), Vite + tsc (TypeScript). Panel dropped
-  2026-11-02 (look & feel, framework fights, static rasters).
+  2026-11-02 (look & feel, framework fights, static rasters). Node ≥22.18 for the
+  sidecar (native-TS execution; locked 2026-11-10).
 - Execution: `plot.py` runs **inside the render worker** (isolated process, fresh
   namespace per run, watchdog timeout, kill/restart on fatal) against a live bokeh
   document; `bm.show()` attaches figures — **DynamicMaps stay dynamic** (zoom
@@ -69,15 +69,16 @@ Two 121 MB files, ~708k rows × 9 columns. Know these before touching the loader
 **UI-free core.** Loading, workspace model, script-execution semantics, SDK, manifest
 generation live in `better_mad/core` and must be headless and pytest-covered — no
 framework imports in `core/`. Worker process lifecycle lives in `better_mad/worker/`
-(headless, pytest-covered; it necessarily imports bokeh), sidecar lifecycle will
-land beside the sidecar host in M3.3. Thin layers over the core:
+(headless, pytest-covered; it necessarily imports bokeh); sidecar lifecycle lives
+in `better_mad/hub/sidecar.py` beside the hub (M3.3), mirroring
+`worker/manager.py`. Thin layers over the core:
 `better_mad/worker/` (bokeh server render worker), `better_mad/hub/` (FastAPI
 transport), `web/` (React SPA), `sidecar/` (Node pi-chat host). Don't let UI
 concerns leak into core.
 
 ## Working conventions
 - Python ≥3.11 (system has 3.14), manage with `uv`; lint/format `ruff`, types `ty`.
-  **Node ≥20** required for the chat sidecar (M3+); TypeScript in `sidecar/`.
+  **Node ≥22.18** required for the chat sidecar (native-TS execution; M3.3); TypeScript in `sidecar/`.
 - float32 for attribute columns, float64 for coordinates; parquet cache in
   `~/.cache/better-mad/` (design §6).
 - When a discussion changes a decision or adds one: update `design.md`/`UX.md` in the
@@ -116,8 +117,10 @@ concerns leak into core.
 ```bash
 uv sync                 # install deps
 uv run better-mad       # start hub (+ worker, sidecar, SPA) (M3+)
+uv run better-mad --model provider/model   # override the chat model (M3.3+)
 uv run pytest           # tests
 uv run ruff check . && uv run ty check   # lint + types
-npm install             # web/ + sidecar/ deps (Node ≥ 22.18 for the sidecar; M3+)
-npm run dev             # Vite dev server, proxies /api → hub (M3+)
+npm install             # sidecar/ deps (Node ≥ 22.18) — then web/ in M3.4
+cd sidecar && npm run typecheck && npm test   # sidecar gates (M3.3+)
+npm run dev             # Vite dev server, proxies /api → hub (M3.4+)
 ```

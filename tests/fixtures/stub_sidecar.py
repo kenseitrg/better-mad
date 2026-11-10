@@ -29,7 +29,7 @@ _open: list[BaseHTTPRequestHandler] = []
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args: object) -> None:  # silence the test log
+    def log_message(self, format: str, *args: object) -> None:  # silence the test log
         pass
 
     def _json(self, code: int, payload: dict) -> None:
