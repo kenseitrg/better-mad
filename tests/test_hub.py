@@ -315,7 +315,9 @@ async def test_broken_script_error_and_last_good(hub: SimpleNamespace) -> None:
                 e["type"] == "run_result" and e["status"] == "error" for e in evs
             ),
         )
-        run = next(e for e in events if e["type"] == "run_result")
+        # The ERROR result, not the first run_result: a stale ok event from a
+        # previous test's watcher auto-run can land first (observed flake).
+        run = next(e for e in events if e["type"] == "run_result" and e["status"] == "error")
         assert run["status"] == "error"
         assert "ValueError: boom" in run["stderr_tail"]  # traceback surfaced
 

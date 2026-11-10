@@ -2,10 +2,13 @@
 
 ``better-mad [files...]`` starts the hub: create/load workspace → load CLI
 files (errors print and continue — a bad file never crashes the hub) →
-:class:`WorkerManager` + FastAPI app → uvicorn (blocks) → browser opens once
-``/api/health`` is green. The hub owns the worker spawn, so the port must be
-known before boot: the CLI port (or an allocated free one for ``--port 0``)
-becomes both the uvicorn bind port and the worker's websocket origin.
+:class:`WorkerManager` + :class:`SidecarManager` + FastAPI app → uvicorn
+(blocks) → browser opens once ``/api/health`` is green. The hub owns the
+worker spawn, so the port must be known before boot: the CLI port (or an
+allocated free one for ``--port 0``) becomes both the uvicorn bind port and
+the worker's websocket origin. A chat boot failure never blocks the hub —
+the SidecarManager degrades to ``down`` and ``/api/chat/*`` serves 503
+(design §9.1).
 
 The superseded Panel app layer (``better_mad.app``) is no longer imported
 (handoff W10); it stays in the tree until the cleanup step removes it.
@@ -41,8 +44,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace",
         help="workspace directory (default: timestamped under ~/.cache/better-mad/workspaces)",
     )
+    parser.add_argument(
+        "--model",
+        type=_model_spec,
+        default=None,
+        help='chat model override as "provider/model" (default: the pi config default)',
+    )
     parser.add_argument("--version", action="version", version=f"better-mad {__version__}")
     return parser
+
+
+def _model_spec(value: str) -> str:
+    """Validate the --model SHAPE only ("provider/model"); real resolution is
+    Node-side, against the user's ~/.pi/agent catalogs (handoff §8)."""
+    provider, sep, model = value.partition("/")
+    if not sep or not provider or not model:
+        raise argparse.ArgumentTypeError('--model must look like "provider/model"')
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from better_mad.core.workspace import create_workspace
     from better_mad.hub.app import create_app
+    from better_mad.hub.sidecar import SidecarManager
     from better_mad.worker.manager import WorkerManager
 
     ws = create_workspace(Path(args.workspace) if args.workspace else _default_workspace_dir())
@@ -70,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         f"127.0.0.1:{port}",
         script_path=ws.script_path,
     )
-    app = create_app(ws, manager)
+    sidecar = SidecarManager(ws.path, model=args.model)
+    app = create_app(ws, manager, sidecar=sidecar)
 
     if not args.no_browser:
         threading.Thread(target=_open_browser_when_ready, args=(port,), daemon=True).start()

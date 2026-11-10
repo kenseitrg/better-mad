@@ -1,13 +1,16 @@
 """FastAPI hub (design §9, handoff M3.2): the process the SPA talks to.
 
-Owns the workspace (core), the render worker (via :class:`WorkerManager`),
-and the ``plot.py`` watcher. Serves the REST + SSE API under ``/api`` (the
-full contract is handoff §4) plus the built SPA from ``web/dist`` when it
-exists; otherwise a minimal placeholder page.
+Owns the workspace (core), the render worker (via :class:`WorkerManager`), the
+chat sidecar (via :class:`SidecarManager`, M3.3), and the ``plot.py`` watcher.
+Serves the REST + SSE API under ``/api`` (the full contract is handoff §4)
+plus the built SPA from ``web/dist`` when it exists; otherwise a minimal
+placeholder page.
 
-**Reserved:** ``/api/chat/*`` belongs to the M3.3 chat sidecar proxy (design
-§9.1, pwb transport contract) and is deliberately NOT implemented here —
-nothing else may live under that path until the sidecar lands.
+``/api/chat/*`` (M3.3): a dumb same-path passthrough proxy to the sidecar's
+identical routes (§4) — bytes in, bytes out; the hub parses nothing beyond
+transport (design §4.2). Sidecar down/starting → ``503``; SSE is streamed
+with read-timeout disabled and the upstream closed on client disconnect
+(trap T9).
 
 Testability (trap W6): no uvicorn is booted in pytest. :meth:`HubState.start`
 /:meth:`HubState.stop` are idempotent callables wired to the FastAPI lifespan,
@@ -29,21 +32,26 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from better_mad.core.dataset import Dataset
 from better_mad.core.loading import LoaderError, ParserSettings
 from better_mad.core.workspace import Workspace
+from better_mad.hub.sidecar import SidecarManager
 from better_mad.hub.watcher import PlotWatcher
 from better_mad.worker.manager import WorkerManager
 
 logger = logging.getLogger("better_mad.hub")
 
 SSE_HEARTBEAT_S = 20.0  # heartbeat comment cadence on /api/events (handoff §4)
+#: Buffered chat-proxy calls (send/stop/new/history answer immediately; the
+#: sidecar streams over SSE, so a bounded timeout only guards a dead sidecar).
+CHAT_PROXY_TIMEOUT_S = 10.0
 
 _PLACEHOLDER_PAGE = (
     "<!doctype html><html><head><title>better-mad</title></head><body>"
@@ -67,17 +75,27 @@ class HubState:
         ws: Workspace,
         manager: WorkerManager,
         *,
+        sidecar: SidecarManager | None = None,
         watcher_interval_s: float = 0.3,
         watcher_stability_s: float = 0.5,
     ) -> None:
         self.ws = ws
         self.manager = manager
+        self.sidecar = sidecar  # None → /api/chat/* serves 503 (tests without Node)
         self.auto_run = True  # handoff §6: auto-run defaults ON, togglable
         self.last_run: dict | None = None
         self._queues: list[asyncio.Queue[dict]] = []
         self._run_task: asyncio.Task | None = None
         self._unsubscribe_manager: Callable[[], None] | None = None
+        self._unsubscribe_sidecar: Callable[[], None] | None = None
+        self._chat_client: httpx.AsyncClient | None = None
         self._started = False
+        # Subscribe at construction (unlike the worker, whose subscription
+        # happens in start()): tests may drive the sidecar directly without
+        # HubState.start() (which also spawns the render worker), and chat
+        # transitions must still fan out. One-shot apps: stop() unsubscribes.
+        if sidecar is not None:
+            self._unsubscribe_sidecar = sidecar.subscribe(self._on_sidecar_event)
         self.watcher = PlotWatcher(
             ws.script_path,
             self._on_plot_changed,
@@ -93,20 +111,47 @@ class HubState:
         self._started = True
         self._unsubscribe_manager = self.manager.subscribe(self._on_manager_event)
         await self.manager.start()
+        if self.sidecar is not None:
+            await self.sidecar.start()
         self.watcher.start()
 
     async def stop(self) -> None:
-        if not self._started:
-            return
+        started = self._started
         self._started = False
-        self.watcher.stop()
-        if self._run_task is not None and not self._run_task.done():
-            self._run_task.cancel()
-            self._run_task = None
-        if self._unsubscribe_manager is not None:
-            self._unsubscribe_manager()
-            self._unsubscribe_manager = None
-        await self.manager.stop()
+        if started:
+            self.watcher.stop()
+            if self._run_task is not None and not self._run_task.done():
+                self._run_task.cancel()
+                self._run_task = None
+            if self._unsubscribe_manager is not None:
+                self._unsubscribe_manager()
+                self._unsubscribe_manager = None
+            await self.manager.stop()
+        if self.sidecar is not None:
+            if self._unsubscribe_sidecar is not None:
+                self._unsubscribe_sidecar()
+                self._unsubscribe_sidecar = None
+            await self.sidecar.stop()
+        await self._close_chat_client()
+
+    def _on_sidecar_event(self, event: dict) -> None:
+        """Chat lifecycle events flow to SSE verbatim (``{"type": "chat", ...}``)."""
+        self.emit(event)
+
+    # --- shared proxy client ---------------------------------------------
+
+    @property
+    def chat_client(self) -> httpx.AsyncClient:
+        """One shared client for /api/chat/* proxying (created lazily so tests
+        that never proxy pay nothing)."""
+        if self._chat_client is None:
+            self._chat_client = httpx.AsyncClient(timeout=httpx.Timeout(CHAT_PROXY_TIMEOUT_S))
+        return self._chat_client
+
+    async def _close_chat_client(self) -> None:
+        if self._chat_client is not None:
+            await self._chat_client.aclose()
+            self._chat_client = None
 
     # --- events (SSE fan-out) --------------------------------------------
 
@@ -142,6 +187,7 @@ class HubState:
                 "last_change_ts": self.watcher.last_change_ts,
                 "pending": self.watcher.pending,
             },
+            "chat": self.sidecar.chat_info() if self.sidecar is not None else {"state": "disabled"},
         }
 
     def _on_plot_changed(self) -> None:
@@ -192,11 +238,15 @@ def create_app(
     ws: Workspace,
     manager: WorkerManager,
     *,
+    sidecar: SidecarManager | None = None,
     static_dir: Path | None = None,
     watcher_interval_s: float = 0.3,
     watcher_stability_s: float = 0.5,
 ) -> FastAPI:
     """Assemble the hub FastAPI app (routes + lifespan + optional SPA mount).
+
+    ``sidecar``: the chat sidecar manager (M3.3). ``None`` keeps ``/api/chat/*``
+    total — it serves ``503`` with a "disabled" reason (tests without Node).
 
     ``static_dir``: a built SPA (``web/dist``). When ``None``, a couple of
     conventional locations are probed (cwd, dev checkout root); if nothing is
@@ -206,6 +256,7 @@ def create_app(
     state = HubState(
         ws,
         manager,
+        sidecar=sidecar,
         watcher_interval_s=watcher_interval_s,
         watcher_stability_s=watcher_stability_s,
     )
@@ -224,9 +275,15 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict:
-        # Total by design: worker state comes from the manager, which degrades
-        # to "down" — the hub itself never dies with the worker (handoff §5.5).
-        return {"ok": True, "workspace": str(ws.path), "worker": manager.worker_info()}
+        # Total by design: worker + sidecar state come from their managers,
+        # which degrade to "down" — the hub itself never dies with either
+        # (handoff §5.5 / §7).
+        return {
+            "ok": True,
+            "workspace": str(ws.path),
+            "worker": manager.worker_info(),
+            "chat": sidecar.chat_info() if sidecar is not None else {"state": "disabled"},
+        }
 
     @app.get("/api/status")
     async def status() -> dict:
@@ -312,7 +369,89 @@ def create_app(
     async def embed() -> dict:
         return manager.embed_info()
 
+    # --- chat proxy (M3.3) -------------------------------------------------
+    # Dumb same-path passthrough to the sidecar's identical routes (§4): no
+    # interpretation, no rewriting — the hub parses nothing beyond transport
+    # (design §4.2). Down/starting sidecar → 503 with its reason.
+
+    def _chat_unavailable() -> JSONResponse:
+        info = sidecar.chat_info() if sidecar is not None else {"state": "disabled"}
+        reason = info.get("reason") or f"chat sidecar {info.get('state', 'disabled')}"
+        return JSONResponse(
+            {"error": "chat sidecar unavailable", "reason": reason}, status_code=503
+        )
+
+    async def _chat_passthrough(method: str, path: str, request: Request | None) -> Response:
+        base = sidecar.base_url() if sidecar is not None else None
+        if base is None:
+            return _chat_unavailable()
+        body = await request.body() if request is not None else None
+        headers = (
+            {"content-type": request.headers.get("content-type", "application/json")}
+            if request is not None
+            else None
+        )
+        try:
+            upstream = await state.chat_client.request(
+                method, f"{base}/api/chat/{path}", content=body, headers=headers
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("chat proxy %s %s failed: %s", method, path, exc)
+            return JSONResponse(
+                {"error": "chat sidecar unavailable", "reason": f"sidecar unreachable: {exc}"},
+                status_code=503,
+            )
+        # Status + body mapped through verbatim; content-type carried along.
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
+
+    @app.get("/api/chat/events")
+    async def chat_events() -> Response:
+        base = sidecar.base_url() if sidecar is not None else None
+        if base is None:
+            return _chat_unavailable()
+        client = state.chat_client
+
+        async def stream() -> AsyncIterator[bytes]:
+            # Read-timeout disabled (trap T9): the sidecar heartbeats itself.
+            # `async with` closes the upstream on client disconnect (the
+            # generator is aclosed by StreamingResponse teardown).
+            async with client.stream(
+                "GET",
+                f"{base}/api/chat/events",
+                timeout=httpx.Timeout(CHAT_PROXY_TIMEOUT_S, read=None),
+            ) as upstream:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},  # W8
+        )
+
+    @app.post("/api/chat/send")
+    async def chat_send(request: Request) -> Response:
+        return await _chat_passthrough("POST", "send", request)
+
+    @app.post("/api/chat/stop")
+    async def chat_stop() -> Response:
+        return await _chat_passthrough("POST", "stop", None)
+
+    @app.post("/api/chat/new")
+    async def chat_new() -> Response:
+        return await _chat_passthrough("POST", "new", None)
+
+    @app.get("/api/chat/history")
+    async def chat_history() -> Response:
+        return await _chat_passthrough("GET", "history", None)
+
     # --- events (SSE) ---------------------------------------------------------
+    # Hub-side events: run results, worker lifecycle, chat lifecycle, embed
+    # epoch (via hello). Chat-side SSE lives at /api/chat/events above.
 
     @app.get("/api/events")
     async def events() -> StreamingResponse:
