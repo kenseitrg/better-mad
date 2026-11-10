@@ -294,10 +294,12 @@ localhost; the hub owns every spawn):
   Dev mode: Vite dev server proxies `/api` → hub (pwb pattern); prod: hub serves
   `web/dist`.
 - **Core** (`better_mad/core/`, unchanged rule): loading, workspace model, manifest
-  generation, script execution semantics, sidecar lifecycle — headless, pytest-covered.
+  generation, script execution semantics — headless, pytest-covered.
   No framework imports in core (worker imports bokeh/hv; hub imports fastapi; neither
-  leaks into loading/workspace/runner logic).
-- Python ≥ 3.11 (**uv**, ruff, ty); **Node ≥ 20** (sidecar + web tooling); deps add
+  leaks into loading/workspace/runner logic). Worker + sidecar lifecycle managers
+  live with their layers (`worker/`, `hub/`), not in core (fixed 2026-11-10).
+- Python ≥ 3.11 (**uv**, ruff, ty); **Node ≥ 22.18** (sidecar: native TS execution;
+  20 EOL April 2026; M3.3 decision) + web tooling; deps add
   `fastapi`, `uvicorn`, `httpx`.
 - CLI: `better-mad [files...]` → workspace + hub + browser, as before.
 

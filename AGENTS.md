@@ -27,7 +27,8 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
 - Phase: **M3 in progress — M3.2 done** (hub backend; exit criteria verified in
   pytest + live curl smoke incl. kill -9 restart with last-good replay; chat proxy
   deferred to M3.3 — `/api/chat/*` reserved). Next: **M3.3 Node chat sidecar** —
-  see PLAN.md M3.3 (no handoff file yet at time of writing).
+  handoff ready: `HANDOFF-M3.3-sidecar.md` (sidecar + `hub/sidecar.py` + proxy;
+  decisions locked 2026-11-10: node:http, native-TS Node ≥22.18, manager in hub/).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -117,6 +118,6 @@ uv sync                 # install deps
 uv run better-mad       # start hub (+ worker, sidecar, SPA) (M3+)
 uv run pytest           # tests
 uv run ruff check . && uv run ty check   # lint + types
-npm install             # web/ + sidecar/ deps (Node ≥ 20; M3+)
+npm install             # web/ + sidecar/ deps (Node ≥ 22.18 for the sidecar; M3+)
 npm run dev             # Vite dev server, proxies /api → hub (M3+)
 ```

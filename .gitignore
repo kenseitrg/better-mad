@@ -219,3 +219,6 @@ __marimo__/
 
 data/
 .pi/
+
+# Node (sidecar/, web/)
+node_modules/
