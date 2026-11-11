@@ -27,7 +27,8 @@ parquet cache) is restored in M0 — restore from there, don't rewrite.
 - Phase: **M3 in progress — M3.3 done** (chat sidecar + hub proxy; exit criteria
   verified in vitest/pytest + live smoke: hello plot.py via chat, SSE text + tool
   events, kill -9 restart, clean shutdown). Next: **M3.4 SPA shell** — three-pane
-  React/TS app (chat | plot/code | files); R2b sizing spike early per PLAN.md.
+  React/TS app (chat | plot/code | files); instructions in `HANDOFF-M3.4-spa.md`;
+  R2b sizing spike early per PLAN.md.
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
