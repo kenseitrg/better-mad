@@ -38,6 +38,10 @@ export function CodePane(props: {
   const viewRef = useRef<EditorView | null>(null);
   const lastSavedRef = useRef<string | null>(null); // null until initial load lands
   const saveTimerRef = useRef<number | null>(null);
+  /** Bumped by every explicit user action (save/reload/overwrite) — a
+   * plot_changed GET that resolves after this must be dropped (its disk
+   * snapshot is stale; a fresh event follows if content still differs). */
+  const userGenRef = useRef(0);
   const [banner, setBanner] = useState<string | null>(null); // disk content pending decision
   const [outputOpen, setOutputOpen] = useState(false);
 
@@ -51,6 +55,7 @@ export function CodePane(props: {
     if (view === null || lastSavedRef.current === null) return;
     const content = view.state.doc.toString();
     if (!force && content === lastSavedRef.current) return; // nothing to save
+    userGenRef.current += 1;
     api
       .putPlot(content)
       .then(() => {
@@ -129,15 +134,21 @@ export function CodePane(props: {
     if (plotChangedTick === 0) return; // initial render, no event yet
     const view = viewRef.current;
     if (view === null) return;
+    const gen = userGenRef.current; // user actions during the GET invalidate this pass
     api
       .getPlot()
       .then((res) => {
-        if (viewRef.current !== view) return;
+        if (viewRef.current !== view || userGenRef.current !== gen) return;
+        const saved = lastSavedRef.current;
+        if (saved !== null && res.content === saved) {
+          // Own-write echo (PUT landed; the buffer may already have moved on).
+          lastSavedRef.current = res.content;
+          return;
+        }
         const buffer = view.state.doc.toString();
-        const dirty = lastSavedRef.current !== null && buffer !== lastSavedRef.current;
+        const dirty = saved !== null && buffer !== saved;
         switch (externalChangePolicy(buffer, res.content, dirty)) {
           case "noop":
-            // Own-write echo (possibly a PUT still in flight): mark clean.
             lastSavedRef.current = res.content;
             break;
           case "reload":
@@ -156,10 +167,31 @@ export function CodePane(props: {
 
   const reloadFromDisk = () => {
     const view = viewRef.current;
-    if (view === null || banner === null) return;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: banner } });
-    lastSavedRef.current = banner;
+    if (view === null) return;
+    // Re-fetch CURRENT disk — the banner snapshot may be stale (an in-flight
+    // autosave can have landed since the banner was set); the user said
+    // "disk wins", so load what disk holds NOW. Bumping the generation
+    // drops any plot_changed handling that resolves after this action.
+    userGenRef.current += 1;
     setBanner(null);
+    api
+      .getPlot()
+      .then((res) => {
+        if (viewRef.current !== view) return;
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: res.content },
+        });
+        lastSavedRef.current = res.content;
+      })
+      .catch(() => {
+        // Transport failed: fall back to the (possibly stale) snapshot.
+        if (banner !== null) {
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: banner },
+          });
+          lastSavedRef.current = banner;
+        }
+      });
   };
 
   const overwrite = () => {
