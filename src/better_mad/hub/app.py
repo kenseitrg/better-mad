@@ -293,11 +293,7 @@ def create_app(
 
     @app.get("/api/files")
     async def list_files() -> dict:
-        return {
-            "datasets": [
-                _dataset_summary(name, ds) for name, ds in ws.datasets.items()
-            ]
-        }
+        return {"datasets": [_dataset_summary(name, ds) for name, ds in ws.datasets.items()]}
 
     @app.post("/api/files/import")
     async def import_file(
@@ -370,8 +366,10 @@ def create_app(
         return manager.embed_info()
 
     # --- chat proxy (M3.3) -------------------------------------------------
-    # Dumb same-path passthrough to the sidecar's identical routes (§4): no
-    # interpretation, no rewriting — the hub parses nothing beyond transport
+    # Dumb passthrough to the sidecar for its routes send/stop/new/history/
+    # events (§4, same paths) plus the SPA-added /api/chat/health (M3.4 §7.1
+    # — the sidecar's health route is /health, the one path that is
+    # rewritten). No interpretation — the hub parses nothing beyond transport
     # (design §4.2). Down/starting sidecar → 503 with its reason.
 
     def _chat_unavailable() -> JSONResponse:
@@ -391,9 +389,12 @@ def create_app(
             if request is not None
             else None
         )
+        # The sidecar serves /health (not /api/chat/health — M3.3 §4): the only
+        # proxied path with a rewrite (handoff M3.4 §7.1).
+        upstream_path = "/health" if path == "health" else f"/api/chat/{path}"
         try:
             upstream = await state.chat_client.request(
-                method, f"{base}/api/chat/{path}", content=body, headers=headers
+                method, f"{base}{upstream_path}", content=body, headers=headers
             )
         except httpx.HTTPError as exc:
             logger.warning("chat proxy %s %s failed: %s", method, path, exc)
@@ -448,6 +449,12 @@ def create_app(
     @app.get("/api/chat/history")
     async def chat_history() -> Response:
         return await _chat_passthrough("GET", "history", None)
+
+    @app.get("/api/chat/health")
+    async def chat_health() -> Response:
+        """Sidecar ``/health`` proxied (M3.4 §7.1): the SPA needs ``busy`` at
+        boot — ``/api/health``'s chat section carries lifecycle state only."""
+        return await _chat_passthrough("GET", "health", None)
 
     # --- events (SSE) ---------------------------------------------------------
     # Hub-side events: run results, worker lifecycle, chat lifecycle, embed

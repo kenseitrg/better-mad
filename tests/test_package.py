@@ -22,6 +22,20 @@ def test_parser_files_and_port() -> None:
     assert args.port == 8050
 
 
+def test_parser_dev_origin_repeatable() -> None:
+    """M3.4 §7.2: --dev-origin is repeatable, default empty (prod unchanged)."""
+    args = build_parser().parse_args(
+        [
+            "--dev-origin",
+            "http://localhost:5173",
+            "--dev-origin",
+            "http://localhost:5174",
+        ]
+    )
+    assert args.dev_origin == ["http://localhost:5173", "http://localhost:5174"]
+    assert build_parser().parse_args([]).dev_origin == []
+
+
 def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
     """CLI rewiring (M3.2): main() builds the hub app (workspace + worker
     manager) and hands it to uvicorn; with ``uvicorn.run`` stubbed out, no
@@ -54,7 +68,16 @@ def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(uvicorn, "run", fake_run)
     ws_dir = tmp_path / "ws"
     code = cli.main(
-        ["a.txt", "--port", "8050", "--no-browser", "--workspace", str(ws_dir)]
+        [
+            "a.txt",
+            "--port",
+            "8050",
+            "--no-browser",
+            "--workspace",
+            str(ws_dir),
+            "--dev-origin",
+            "http://localhost:5173",  # M3.4 §7.2: forwarded to the manager
+        ]
     )
     assert code == 0
     assert calls["host"] == "127.0.0.1"
@@ -66,3 +89,4 @@ def test_main_boots_hub_without_serving(monkeypatch, tmp_path) -> None:
     assert hub.ws.path == ws_dir
     assert hub.auto_run is True
     assert hub.manager.epoch == 1  # lifespan never ran: worker not spawned
+    assert hub.manager._extra_ws_origins == ("http://localhost:5173",)

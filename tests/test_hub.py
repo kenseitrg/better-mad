@@ -59,9 +59,7 @@ df = bm.data('sample_ws')
 bm.show(hv.Curve(df, kdims=['XCORD_MIDPT'], vdims=['TR_DOMFREQ']))
 """
 
-SECOND_CURVE_SCRIPT = (
-    "# a distinct auto-run probe\n" + CURVE_SCRIPT
-)  # different bytes, same glyph
+SECOND_CURVE_SCRIPT = "# a distinct auto-run probe\n" + CURVE_SCRIPT  # different bytes, same glyph
 
 
 # --- fixtures ---------------------------------------------------------------
@@ -88,9 +86,7 @@ async def hub(tmp_path_factory) -> AsyncIterator[SimpleNamespace]:
     await state.start()
 
     # Real-socket server for SSE (lifespan off: the fixture owns start/stop).
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, lifespan="off", log_level="warning"
-    )
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, lifespan="off", log_level="warning")
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve(), name="sse-server")
     await _wait_until(lambda: server.started, 15)
@@ -237,9 +233,7 @@ async def test_file_import_and_list(hub: SimpleNamespace) -> None:
         assert freq["nan_pct"] == 0.0
 
         listing = (await client.get("/api/files")).json()
-        entry = next(
-            d for d in listing["datasets"] if d["name"] == summary["name"]
-        )
+        entry = next(d for d in listing["datasets"] if d["name"] == summary["name"])
         assert entry["columns"] == summary["columns"]
 
         bad = await client.post(
@@ -268,12 +262,9 @@ async def test_plot_roundtrip_and_autorun_events(hub: SimpleNamespace) -> None:
         async with _sse_client(hub) as sse:
             events = await _read_events(
                 sse,
-                until=lambda evs: "plot_changed" in _types(evs)
-                and "run_result" in _types(evs),
+                until=lambda evs: "plot_changed" in _types(evs) and "run_result" in _types(evs),
             )
-        assert _types(events).index("plot_changed") < _types(events).index(
-            "run_result"
-        )
+        assert _types(events).index("plot_changed") < _types(events).index("run_result")
         run = next(e for e in events if e["type"] == "run_result")
         assert run["status"] == "ok"
         assert run["run_seconds"] > 0
@@ -343,8 +334,7 @@ async def test_kill9_restarts_and_replays_last_good(hub: SimpleNamespace) -> Non
             sse,
             action=kill,
             until=lambda evs: any(
-                e["type"] == "run_result" and e["status"] == "ok" and e["epoch"] == 2
-                for e in evs
+                e["type"] == "run_result" and e["status"] == "ok" and e["epoch"] == 2 for e in evs
             ),
         )
         states = [(e["state"], e["epoch"]) for e in events if e["type"] == "worker"]
@@ -372,9 +362,7 @@ async def test_autorun_off_swallows_runs(hub: SimpleNamespace) -> None:
 
         events = await _read_events(
             sse,
-            action=lambda: client.put(
-                "/api/plot.py", json={"content": SECOND_CURVE_SCRIPT}
-            ),
+            action=lambda: client.put("/api/plot.py", json={"content": SECOND_CURVE_SCRIPT}),
             until=lambda evs: "plot_changed" in _types(evs),
             settle_s=SETTLE_GUARD_S,
         )
@@ -392,9 +380,7 @@ async def test_autorun_off_swallows_runs(hub: SimpleNamespace) -> None:
                 "/api/plot.py",
                 json={"content": CURVE_SCRIPT},
             ),
-            until=lambda evs: any(
-                e["type"] == "run_result" and e["status"] == "ok" for e in evs
-            ),
+            until=lambda evs: any(e["type"] == "run_result" and e["status"] == "ok" for e in evs),
         )
         assert any(e["type"] == "run_result" for e in events)
 
@@ -419,21 +405,18 @@ async def test_crash_loop_goes_down_and_degrades_gracefully(tmp_path) -> None:
     try:
         async with _client(SimpleNamespace(app=app)) as client:
             for i in range(3):
-                await _wait_until(
-                    lambda: manager.worker_info()["state"] == "ready", STATE_WINDOW_S
-                )
+                await _wait_until(lambda: manager.worker_info()["state"] == "ready", STATE_WINDOW_S)
                 pid = manager.worker_pid
                 assert pid is not None
                 os.kill(pid, signal.SIGKILL)
                 if i < 2:  # restarts happen (epochs 2, 3)
                     await _wait_until(
-                        lambda i=i: manager.epoch == i + 2
-                        and manager.worker_info()["state"] == "ready",
+                        lambda i=i: (
+                            manager.epoch == i + 2 and manager.worker_info()["state"] == "ready"
+                        ),
                         STATE_WINDOW_S,
                     )
-            await _wait_until(
-                lambda: manager.worker_info()["state"] == "down", STATE_WINDOW_S
-            )
+            await _wait_until(lambda: manager.worker_info()["state"] == "down", STATE_WINDOW_S)
 
             health = (await client.get("/api/health")).json()
             assert health["ok"] is True  # the hub itself never dies
@@ -447,3 +430,47 @@ async def test_crash_loop_goes_down_and_degrades_gracefully(tmp_path) -> None:
             assert files["datasets"]  # everything except /run keeps working
     finally:
         await state.stop()
+
+
+# --- M3.4 §7.2: extra websocket origins ---------------------------------------------
+
+
+async def test_manager_merges_extra_ws_origins(monkeypatch, tmp_path) -> None:
+    """``extra_ws_origins`` merge into the spawn's ``allow_websocket_origin``
+    after the hub origin (lifecycle turns the list into ``--allow-websocket-
+    origin`` cmdline args; the real cmdline is checked in test_worker.py).
+    The spawn is stubbed — no worker process."""
+    import better_mad.worker.manager as manager_mod
+    from better_mad.worker import WorkerHandle
+    from better_mad.worker.server import DEFAULT_SESSION_ID
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_start_worker(data_dir, *, allow_websocket_origin=None, stderr_log=None, **_):
+        captured["origins"] = list(allow_websocket_origin or [])
+        return WorkerHandle(
+            process=None,
+            port=5997,
+            session_id=DEFAULT_SESSION_ID,
+            base_url="http://127.0.0.1:5997",
+        )
+
+    monkeypatch.setattr(manager_mod, "start_worker", fake_start_worker)
+    manager = WorkerManager(
+        tmp_path / "data",
+        "127.0.0.1:5006",
+        script_path=tmp_path / "plot.py",
+        extra_ws_origins=("http://localhost:5173",),
+        health_interval_s=3600,  # must never poll within the test
+    )
+    await manager.start()
+    try:
+        assert captured["origins"] == ["127.0.0.1:5006", "http://localhost:5173"]
+        assert manager.worker_info() == {
+            "state": "ready",
+            "port": 5997,
+            "epoch": 1,
+            "restarts": 0,
+        }
+    finally:
+        await manager.stop()

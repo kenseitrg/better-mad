@@ -50,6 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help='chat model override as "provider/model" (default: the pi config default)',
     )
+    parser.add_argument(
+        "--dev-origin",
+        action="append",
+        default=[],
+        metavar="URL",
+        help=(
+            "extra live-doc websocket origin for dev mode, repeatable "
+            '(e.g. the Vite server "http://localhost:5173" — no effect in prod)'
+        ),
+    )
     parser.add_argument("--version", action="version", version=f"better-mad {__version__}")
     return parser
 
@@ -84,10 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     port = args.port if args.port != 0 else allocate_free_port()
     # The worker must allowlist the hub origin BEFORE it spawns (trap W3: a
     # non-empty allowlist replaces bokeh's default self-origin entries).
+    # --dev-origin adds the dev SPA's origin(s) (M3.4 §7.2, trap T1).
     manager = WorkerManager(
         ws.data_dir,
         f"127.0.0.1:{port}",
         script_path=ws.script_path,
+        extra_ws_origins=tuple(args.dev_origin),
     )
     sidecar = SidecarManager(ws.path, model=args.model)
     app = create_app(ws, manager, sidecar=sidecar)

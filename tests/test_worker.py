@@ -135,6 +135,7 @@ def _doc_signature(payload: str) -> str:
 
 # --- scenario 1: good runs replace the document roots -----------------------
 
+
 def test_good_run_populates_and_replaces_roots(inproc) -> None:
     handle, ws = inproc
 
@@ -174,6 +175,7 @@ def test_attached_figure_fits_container(inproc) -> None:
 
 # --- scenario 2: DynamicMaps stay dynamic -----------------------------------
 
+
 def test_dynamic_map_stays_dynamic(inproc) -> None:
     handle, ws = inproc
     result = _post_run(handle, {"script": _write(ws, RASTERIZE_SCRIPT)})
@@ -204,7 +206,8 @@ def test_zoom_event_re_rasterizes(inproc) -> None:
     doc = handle.state.session.document
     fig = doc.roots[0]
     rend = [
-        r for r in fig.renderers
+        r
+        for r in fig.renderers
         if type(r.glyph).__name__ == "Image" and "image" in r.data_source.data
     ]
     src = rend[0].data_source
@@ -235,6 +238,7 @@ def test_zoom_event_re_rasterizes(inproc) -> None:
 
 # --- scenario 3: error run keeps last good ----------------------------------
 
+
 def test_error_run_keeps_last_good_roots(inproc) -> None:
     handle, ws = inproc
     _post_run(handle, {"script": _write(ws, POINTS_SCRIPT)})
@@ -252,6 +256,7 @@ def test_error_run_keeps_last_good_roots(inproc) -> None:
 
 
 # --- scenario 4: script without show() ---------------------------------------
+
 
 def test_run_without_show_errors_and_document_stays_empty(inproc) -> None:
     handle, ws = inproc
@@ -283,6 +288,7 @@ def test_invalid_run_request_is_400(inproc) -> None:
 
 # --- scenario 5: watchdog timeout kills the worker process -------------------
 
+
 def test_timeout_kills_worker_process(spawned) -> None:
     handle, ws = spawned
     assert handle.health()["ok"] is True  # serving before the hang
@@ -300,6 +306,7 @@ def test_timeout_kills_worker_process(spawned) -> None:
 
 # --- spawned worker end-to-end (the path the M3.2 hub will use) --------------
 
+
 def test_spawned_worker_end_to_end(spawned) -> None:
     handle, ws = spawned
     health = handle.health()
@@ -311,6 +318,28 @@ def test_spawned_worker_end_to_end(spawned) -> None:
     assert result["status"] == "ok", result
     assert "Scatter" in _doc_signature(handle.doc_json())
     assert handle.doc_json() != '{"empty": true}'
+
+
+def test_spawn_cmdline_includes_websocket_origins(tmp_path: Path) -> None:
+    """M3.4 §7.2: origins (the hub's + --dev-origin URLs) reach the worker
+    cmdline as ``--allow-websocket-origin`` args; the worker normalizes URLs
+    to netlocs when building the bokeh allowlist (trap T1)."""
+    ws = _workspace(tmp_path)
+    handle = start_worker(
+        ws.data_dir,
+        allow_websocket_origin=["127.0.0.1:5006", "http://localhost:5173"],
+        stderr_log=tmp_path / "worker.stderr",
+    )
+    try:
+        assert handle.process is not None
+        proc_args = handle.process.args
+        assert isinstance(proc_args, list)  # Popen args: list[str] for our spawn
+        args = [str(a) for a in proc_args]
+        assert args.count("--allow-websocket-origin") == 2
+        assert "127.0.0.1:5006" in args
+        assert "http://localhost:5173" in args
+    finally:
+        handle.stop()
 
 
 def _write(ws: Workspace, source: str) -> Path:

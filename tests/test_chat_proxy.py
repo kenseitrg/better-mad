@@ -98,9 +98,7 @@ async def proxy() -> AsyncIterator[SimpleNamespace]:
 
 
 def _client(proxy: SimpleNamespace) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=proxy.app), base_url="http://test"
-    )
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=proxy.app), base_url="http://test")
 
 
 # --- REST mapping -------------------------------------------------------------
@@ -152,6 +150,19 @@ async def test_stop_and_new_mapped_through(proxy: SimpleNamespace) -> None:
         new = await client.post("/api/chat/new")
         assert new.status_code == 202
         assert new.json() == {"reset": True}
+
+
+async def test_chat_health_mapped_through(proxy: SimpleNamespace) -> None:
+    """``/api/chat/health`` proxies the sidecar's ``/health`` — the one
+    proxied path with a rewrite (the sidecar route is ``/health``, M3.3 §4;
+    handoff M3.4 §7.1: the SPA needs ``busy`` at boot)."""
+    async with _client(proxy) as client:
+        resp = await client.get("/api/chat/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["model"] == "stub/model"
+    assert isinstance(body["busy"], bool)
 
 
 # --- SSE passthrough (real socket) ---------------------------------------------
@@ -260,3 +271,7 @@ async def test_sidecar_down_serves_503(proxy: SimpleNamespace) -> None:
         body = resp.json()
         assert body["error"] == "chat sidecar unavailable"
         assert body["reason"]
+        # The M3.4 health proxy degrades identically.
+        chat_health = await client.get("/api/chat/health")
+        assert chat_health.status_code == 503
+        assert chat_health.json()["error"] == "chat sidecar unavailable"

@@ -31,7 +31,7 @@ import logging
 import time
 import urllib.error
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import httpx
@@ -62,12 +62,17 @@ class WorkerManager:
         hub_origin: str,
         *,
         script_path: Path,
+        extra_ws_origins: Sequence[str] = (),
         health_interval_s: float = 2.0,
         restart_limit: int = 3,
         restart_window_s: float = 60.0,
     ) -> None:
         self._data_dir = Path(data_dir)
         self._hub_origin = hub_origin
+        # Extra live-document websocket origins (URLs or host:port — the
+        # worker normalizes): the dev SPA's Vite origin, passed by the CLI's
+        # --dev-origin (M3.4 §7.2, trap T1). Prod stays empty.
+        self._extra_ws_origins = tuple(extra_ws_origins)
         self._script_path = Path(script_path)
         self._stderr_log = self._data_dir / "worker.log"  # handoff §11
         self._health_interval_s = health_interval_s
@@ -196,7 +201,7 @@ class WorkerManager:
         return await asyncio.to_thread(
             start_worker,
             self._data_dir,
-            allow_websocket_origin=[self._hub_origin],
+            allow_websocket_origin=[self._hub_origin, *self._extra_ws_origins],
             stderr_log=self._stderr_log,
         )
 
@@ -225,9 +230,7 @@ class WorkerManager:
             }
         )
 
-    async def _execute(
-        self, target: Path, *, timeout_s: float | None, track: bool
-    ) -> dict | None:
+    async def _execute(self, target: Path, *, timeout_s: float | None, track: bool) -> dict | None:
         """Issue one ``/run`` (caller holds ``_run_lock``). Returns the result
         dict (with ``epoch``) or ``None`` when the worker is down/unreachable.
 
@@ -272,10 +275,7 @@ class WorkerManager:
                 "status": "error",
                 "run_seconds": 0.0,
                 "stdout_tail": "",
-                "stderr_tail": (
-                    f"worker connection lost during run "
-                    f"({type(exc).__name__}: {exc})"
-                ),
+                "stderr_tail": (f"worker connection lost during run ({type(exc).__name__}: {exc})"),
             }
             self._schedule_restart("worker died during run")
         finally:
