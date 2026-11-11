@@ -290,7 +290,9 @@ localhost; the hub owns every spawn):
 - **Chat sidecar** (`sidecar/`, Node/TypeScript): see §9.1.
 - **SPA** (`web/`, React + TypeScript + Vite): three-pane shell (chat | plot/code |
   files), CodeMirror 6 editor, plot pane embedding the live document via
-  `bokeh.embed.server_document`, chat pane (React port of pwb's client), files pane.
+  `bokeh.embed.server_session`'s autoload recipe verbatim (fetch `autoload.js` with
+  the `Bokeh-Session-Id` header → blob → script tag; no bokeh npm package — M3.4),
+  chat pane (React port of pwb's client), files pane.
   Dev mode: Vite dev server proxies `/api` → hub (pwb pattern); prod: hub serves
   `web/dist`.
 - **Core** (`better_mad/core/`, unchanged rule): loading, workspace model, manifest

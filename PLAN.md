@@ -179,6 +179,14 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   external-change policy, Output drawer); chat pane (React port of pwb's client:
   streaming, tool notes, busy/stop/new, history replay); error/staleness/empty
   states per UX §6/§9.
+  ✔ done 2026-11-11 — exit loop verified live at 1920×1080 in one headless window
+  (chat prompt → agent wrote plot.py → watcher ran → canvas 1248×1002 → wheel zoom
+  re-rasterized, worker WS frames 29→55); kill -9 worker → re-embed epoch+1 with
+  last-good plot back; kill -9 sidecar → chat banner in 308 ms, composer disabled,
+  plot/editor/files alive, auto-restart; staleness badge + fix-restores; dirty-
+  editor Reload/Overwrite banner; auto-run off → manual Run only; prod build
+  served by the hub at :5006 (zoom re-raster, no console errors). 134 pytest +
+  45 vitest, ruff/ty/tsc green.
   *Exit:* type "scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ" in chat →
   agent writes `plot.py` → watcher runs → live plot appears → **zoom re-rasterizes**.
   Full loop in one window; verified at 1920×1080.
@@ -229,6 +237,11 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   to a toolbar-height strip unless every div in the chain is forced to full
   height (fix: the M3.1 `div{height:100vh !important}` pattern, applied in
   `scripts/m32_qa_demo.py`; the SPA container must do the same).
+  **Final SPA pattern (M3.4, verified):** `.plot-embed` (flex-filled pane child)
+  + `.plot-embed, .plot-embed div { height: 100% !important }` — canvas measured
+  exactly equal to the container in dev and prod. Bokeh 3.x renders views into
+  Shadow DOM: DOM probes must pierce `shadowRoot` (a rendered figure shows zero
+  top-level canvases and empty host `innerHTML`).
 - **R3 Watcher debounce** vs. agents that write files in bursts — coalesce runs;
   never run a script that is mid-write (stability check: unchanged for N ms).
 - **R4 Model capability floor** — if small local models fail even with skills,

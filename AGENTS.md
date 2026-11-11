@@ -24,11 +24,12 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M3 in progress — M3.3 done** (chat sidecar + hub proxy; exit criteria
-  verified in vitest/pytest + live smoke: hello plot.py via chat, SSE text + tool
-  events, kill -9 restart, clean shutdown). Next: **M3.4 SPA shell** — three-pane
-  React/TS app (chat | plot/code | files); instructions in `HANDOFF-M3.4-spa.md`;
-  R2b sizing spike early per PLAN.md.
+- Phase: **M3 in progress — M3.4 done** (SPA shell; exit criteria verified live:
+  chat → agent writes plot.py → watcher runs → live plot → zoom re-rasterizes at
+  1920×1080, one window; kill -9 worker → re-embed with last-good; kill -9 sidecar
+  → chat banner, everything else alive; prod build served by the hub verified).
+  Next: **M3.5 files panel & polish** (import settings, click-to-copy, close
+  confirm, theme/empty states; PLAN.md M3.5).
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -113,15 +114,29 @@ concerns leak into core.
   rules, DynamicMap/opts pickling). They applied to the archived Panel app layer —
   see `sessions/2026-08-17-v2-pivot-and-m2.md` and M2 commits. Do not carry them
   into the new stack.
+- SPA-era gotcha (M3.4): **Bokeh 3.x renders views into Shadow DOM** —
+  `document.querySelectorAll('canvas')` finds nothing; probe by walking
+  `el.shadowRoot` recursively (see `embed.ts`/QA scripts). `innerHTML` of the
+  host (`.bk-Figure`) also looks empty while the figure is fully rendered.
+- SPA-era gotcha (M3.4): **center-view stacking must keep layout computed** —
+  toggling Preview/Code uses stacked `visibility` layers, not `display:none`
+  (which zeroes the live bokeh container → stale canvas on re-show, and
+  un-measures CodeMirror).
 
 ## Commands (fill in as milestones land)
 ```bash
 uv sync                 # install deps
 uv run better-mad       # start hub (+ worker, sidecar, SPA) (M3+)
 uv run better-mad --model provider/model   # override the chat model (M3.3+)
+uv run better-mad data/<file> --no-browser --dev-origin http://localhost:5173
+                        # dev mode: allowlist the Vite origin for the live-doc
+                        # WebSocket (trap T1 — without it the plot pane shows
+                        # nothing; check the browser console for the 403)
 uv run pytest           # tests
 uv run ruff check . && uv run ty check   # lint + types
-npm install             # sidecar/ deps (Node ≥ 22.18) — then web/ in M3.4
-cd sidecar && npm run typecheck && npm test   # sidecar gates (M3.3+)
-npm run dev             # Vite dev server, proxies /api → hub (M3.4+)
+cd sidecar && npm install && (npm run typecheck && npm test)   # sidecar (M3.3+)
+cd web && npm install                    # web/ deps (M3.4+)
+cd web && npm run dev                    # Vite dev server on 5173, proxies /api → hub
+cd web && npm run typecheck && npm test  # web gates (M3.4+)
+npm run build           # prod SPA → web/dist, served by the hub automatically
 ```
