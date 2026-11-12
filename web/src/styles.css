@@ -190,9 +190,20 @@ label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 1
   position: relative;
   background: var(--bg);
 }
+/* R2b: the embed is an iframe (one per embed, 2026-11-12); inside it,
+   autoload.js injects a div.bk-root with height:auto and the worker's
+   stretch_both measures the PARENT — the iframe doc forces the div chain to
+   full height (see embed.ts srcdoc) and the iframe itself fills the pane. */
 .plot-embed,
-.plot-embed div {
+.plot-embed div,
+.plot-embed iframe {
   height: 100% !important;
+}
+.plot-embed iframe {
+  width: 100%;
+  border: 0;
+  display: block;
+  background: var(--bg);
 }
 .plot-empty {
   flex: 1;

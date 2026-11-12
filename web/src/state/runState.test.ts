@@ -132,3 +132,31 @@ describe("lastReason", () => {
     expect(lastReason({ ...err, stderr_tail: "x".repeat(500) }).length).toBeLessThanOrEqual(201);
   });
 });
+
+describe("okSeq (embed token component — dead-WS recovery)", () => {
+  it("bumps on ok runs only", () => {
+    let s = initialRunState();
+    s = runReducer(s, { type: "run_result", result: ok });
+    expect(s.okSeq).toBe(1);
+    s = runReducer(s, { type: "run_result", result: err });
+    expect(s.okSeq).toBe(1);
+    s = runReducer(s, { type: "run_result", result: timeout });
+    expect(s.okSeq).toBe(1);
+    s = runReducer(s, { type: "run_result", result: ok });
+    expect(s.okSeq).toBe(2);
+  });
+
+  it("hello keeps the sequence when the hub confirms the same ok run", () => {
+    let s = initialRunState();
+    s = runReducer(s, { type: "run_result", result: ok });
+    s = runReducer(s, { type: "hello", status: helloWith(ok) });
+    expect(s.okSeq).toBe(1);
+  });
+
+  it("hello resets when there is no last run anywhere", () => {
+    let s = initialRunState();
+    s = runReducer(s, { type: "run_result", result: ok });
+    s = runReducer(s, { type: "hello", status: helloWith(null) });
+    expect(s.okSeq).toBe(0);
+  });
+});

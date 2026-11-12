@@ -190,6 +190,13 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   *Exit:* type "scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ" in chat →
   agent writes `plot.py` → watcher runs → live plot appears → **zoom re-rasterizes**.
   Full loop in one window; verified at 1920×1080.
+  Post-QA fix (2026-11-12, manual QA): stale-tab auto-update — a silently dead
+  bokeh WS froze the preview (epoch unchanged → no re-embed; BokehJS's reconnect
+  repull itself fails on bokeh 3.x bufferless docs, and a same-page re-embed then
+  asserts). Each embed now lives in a srcdoc iframe (fresh JS context, teardown =
+  remove the iframe) and PlotPane re-embeds per ok run (`epoch#okSeq` token) or on
+  a dead-WS liveness report. Verified: simulated WS death → run → recovered in 2 s
+  without reload; full 22-check QA loop re-run; see AGENTS.md gotchas.
 - **M3.5 — Files panel & polish**: file cards (columns, click-to-copy sanitized
   names, min/max/NaN%), import settings (delimiter/sentinels/re-parse), close-file
   confirm when referenced; empty/first-launch states; dark theme.

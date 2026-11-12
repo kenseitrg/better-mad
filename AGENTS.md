@@ -118,6 +118,15 @@ concerns leak into core.
   `document.querySelectorAll('canvas')` finds nothing; probe by walking
   `el.shadowRoot` recursively (see `embed.ts`/QA scripts). `innerHTML` of the
   host (`.bk-Figure`) also looks empty while the figure is fully rendered.
+- SPA-era gotcha (M3.4 QA fix, 2026-11-12): the embedded bokeh WS can die
+  silently (tab sleep / network drop) while the worker epoch is unchanged —
+  and BokehJS's own reconnect repull then fails ("buffer for id=… not found",
+  the bokeh 3.x bufferless-doc limitation), freezing the preview forever;
+  a same-page re-embed afterwards dies with "Error rendering Bokeh items:
+  Assertion failed" (broken global state). Fix: every embed lives in a srcdoc
+  **iframe** (`web/src/embed.ts`) — teardown = remove the iframe (clean JS
+  context, no zombie sockets) — and PlotPane re-embeds on every ok run
+  (`epoch#okSeq` token) or when the iframe reports its WS dead.
 - SPA-era gotcha (M3.4): **center-view stacking must keep layout computed** —
   toggling Preview/Code uses stacked `visibility` layers, not `display:none`
   (which zeroes the live bokeh container → stale canvas on re-show, and

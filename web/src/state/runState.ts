@@ -20,6 +20,8 @@ export interface RunState {
   ranAt: number | null;
   /** When the last result of ANY status arrived (staleness badge time). */
   lastAt: number | null;
+  /** Bumped per OK run — the embed token's run component (dead-WS recovery). */
+  okSeq: number;
   autoRun: boolean;
 }
 
@@ -37,6 +39,7 @@ export function initialRunState(): RunState {
     stale: false,
     ranAt: null,
     lastAt: null,
+    okSeq: 0,
     autoRun: true,
   };
 }
@@ -54,6 +57,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         stale: false,
         ranAt: null,
         lastAt: null,
+        // A reconnect keeps the run sequence when the hub confirms the same
+        // ok run (no gratuitous re-embed/flicker); no runs anywhere → reset.
+        okSeq: lastResult?.status === "ok" ? state.okSeq : 0,
         autoRun: action.status.auto_run,
       };
     }
@@ -73,6 +79,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         stale: !ok && state.ranAt !== null,
         ranAt: ok ? now : state.ranAt,
         lastAt: now,
+        okSeq: ok ? state.okSeq + 1 : state.okSeq,
         autoRun: state.autoRun,
       };
     }
