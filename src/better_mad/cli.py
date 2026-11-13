@@ -10,8 +10,8 @@ the worker's websocket origin. A chat boot failure never blocks the hub —
 the SidecarManager degrades to ``down`` and ``/api/chat/*`` serves 503
 (design §9.1).
 
-The superseded Panel app layer (``better_mad.app``) is no longer imported
-(handoff W10); it stays in the tree until the cleanup step removes it.
+The superseded Panel app layer (``better_mad.app``) is gone since M3.5 (W10
+resolved): the hub serves the SPA and owns the worker + sidecar lifecycle.
 """
 
 from __future__ import annotations

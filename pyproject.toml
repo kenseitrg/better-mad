@@ -11,7 +11,6 @@ dependencies = [
     "pandas>=2.2",
     "pyarrow>=16",
     "holoviews>=1.19",
-    "panel>=1.5",
     "datashader>=0.16",
     "fastapi>=0.162.2",
     "uvicorn>=0.54.0",
