@@ -100,6 +100,7 @@ class RunHandler(tornado.web.RequestHandler):
                 "run_seconds": result.run_seconds,
                 "stdout_tail": result.stdout_tail,
                 "stderr_tail": result.stderr_tail,
+                "has_figure": result.has_figure,  # M3.5: hub passes it verbatim (§5)
             }
         )
 
@@ -168,12 +169,13 @@ async def execute_run(
 ) -> RunResult:
     """Run a script against the shared document and update worker state.
 
-    Run semantics (handoff §4.3):
+    Run semantics (handoff §4.3, M3.5):
     - success with ≥1 ``bm.show()`` → the last figure's bokeh model atomically
       replaces the document roots under the session lock;
     - script exception → error result, document untouched (last good stays);
-    - no ``bm.show()`` at all → error result with the placeholder message,
-      document untouched;
+    - no ``bm.show()`` at all → **ok result with ``has_figure=False``**, document
+      untouched (M3.5: the SPA overlays a placeholder on the last good roots;
+      before M3.5 this was synthesized into an error result);
     - watchdog timeout → the *process* dies inside :func:`run_script` and this
       never returns (hub-side restart, M3.2);
     - the worker itself stays up after error runs (recycling is the hub's call).
@@ -186,16 +188,8 @@ async def execute_run(
     state.running = True
     try:
         result = run_script(script_path, timeout_s=timeout_s, document=state.session.document)
-        if result.status == "ok":
-            if result.plot is None:
-                result = RunResult(
-                    status="error",
-                    run_seconds=result.run_seconds,
-                    stdout_tail=result.stdout_tail,
-                    stderr_tail="script ran but never called bm.show()",
-                )
-            else:
-                await _attach_last_plot(state, result.plot)
+        if result.status == "ok" and result.plot is not None:
+            await _attach_last_plot(state, result.plot)
         state.runs += 1
         state.last_status = result.status
         return result

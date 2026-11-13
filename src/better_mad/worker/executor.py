@@ -41,16 +41,22 @@ class RunResult:
     """Outcome of one in-process script run.
 
     Attributes:
-        status: ``ok`` (ran without exception), ``error`` (script exception,
-            missing script file, or ``bm.show()`` never called),
-            ``timeout`` (contract-only: a real timeout kills the process and
-            returns nothing — see the module docstring).
+        status: ``ok`` (ran without exception), ``error`` (script exception or
+            missing script file), ``timeout`` (contract-only: a real timeout
+            kills the process and returns nothing — see the module docstring).
+            A script that ran cleanly but never called ``bm.show()`` is ``ok``
+            with ``has_figure=False`` (M3.5 — the SPA shows a placeholder;
+            previously this was synthesized into ``error``).
         run_seconds: wall-clock seconds of the exec.
         stdout_tail: last ~2000 chars of captured stdout.
         stderr_tail: last ~2000 chars of captured stderr (traceback appended
             on ``error``).
         plot: the last rendered HoloViews plot object (kept referenced — its
             DynamicMap range callbacks re-rasterize on zoom), or ``None``.
+        has_figure: true iff ``status == "ok"`` and the run attached ≥1 figure
+            via ``bm.show()`` (handoff M3.5 §6.3). Flows verbatim through the
+            hub to the SPA, which treats a missing field as ``true`` (old
+            worker payloads never flash the placeholder).
     """
 
     status: Literal["ok", "error", "timeout"]
@@ -58,6 +64,7 @@ class RunResult:
     stdout_tail: str
     stderr_tail: str
     plot: object | None = None
+    has_figure: bool = False
 
 
 class FigureCollector:
@@ -154,4 +161,5 @@ def run_script(
         stdout_tail=_tail(stdout.getvalue()),
         stderr_tail=_tail(stderr.getvalue()),
         plot=collector.last_plot if status == "ok" else None,
+        has_figure=(status == "ok" and collector.last_plot is not None),
     )

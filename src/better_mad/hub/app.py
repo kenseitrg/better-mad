@@ -29,12 +29,13 @@ import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
 import httpx
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -194,13 +195,15 @@ class HubState:
         """Watcher fired: announce, then auto-run if enabled (handoff §6)."""
         self.emit({"type": "plot_changed"})
         if self.auto_run:
-            self._schedule_run()
+            self.schedule_run()
 
-    def _schedule_run(self) -> None:
+    def schedule_run(self) -> None:
         """Trigger an auto-run; coalesce changes that arrive mid-run.
 
         If a run is in flight, remember ``pending`` and run once afterwards —
-        executing the LATEST script, not a queue (handoff §6).
+        executing the LATEST script, not a queue (handoff §6). Also used for
+        user-initiated dataset changes (re-parse with auto-run on, M3.5 §6.2 —
+        analogous to a plot.py edit; the alternative is a silently stale plot).
         """
         if self._run_task is not None and not self._run_task.done():
             self.watcher.pending = True
@@ -302,15 +305,55 @@ def create_app(
     ) -> dict:
         parser_settings = _parse_settings(settings)
         original = Path(file.filename or "upload.txt").name or "upload.txt"
-        dest = Path(tempfile.mkdtemp(prefix="better-mad-import-")) / original
-        with dest.open("wb") as fh:
-            await asyncio.to_thread(shutil.copyfileobj, file.file, fh)
+        tmpdir = Path(tempfile.mkdtemp(prefix="better-mad-import-"))
         try:
-            ds = await asyncio.to_thread(ws.add_file, dest, parser_settings)
+            dest = tmpdir / original
+            with dest.open("wb") as fh:
+                await asyncio.to_thread(shutil.copyfileobj, file.file, fh)
+            try:
+                # M3.5: add_upload persists a raw copy under .data/sources/ (W9).
+                ds = await asyncio.to_thread(ws.add_upload, dest, original, parser_settings)
+            except LoaderError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return _dataset_summary(ds.name, ds)
+        finally:
+            # T5: the upload temp never leaks — cleaned on success too (the raw
+            # bytes already live in .data/sources/) and on failure alike.
+            await asyncio.to_thread(shutil.rmtree, tmpdir, True)
+
+    @app.post("/api/files/{name}/reparse")
+    async def reparse_file(name: str, body: dict | None = None) -> dict:
+        # Raw dict, not a pydantic model: unknown fields must 400 like import
+        # (one shape, two transports — validation is _settings_from_object's).
+        settings = _settings_from_object(body or {})
+        if name not in ws.datasets:
+            raise HTTPException(status_code=404, detail=f"unknown dataset: {name}")
+        try:
+            ds = await asyncio.to_thread(ws.reparse, name, settings)  # ~11 s cold for 121 MB
         except LoaderError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # W9: the temp path is recorded as the dataset source — accepted for M3.2.
-        return _dataset_summary(ds.name, ds)
+        if state.auto_run:
+            state.schedule_run()  # visible, user-initiated change → re-plot (M3.5 §6.2)
+        return _dataset_summary(name, ds)
+
+    @app.delete("/api/files/{name}")
+    async def close_file(name: str) -> dict:
+        if name not in ws.datasets:
+            raise HTTPException(status_code=404, detail=f"unknown dataset: {name}")
+        await asyncio.to_thread(ws.remove, name)
+        # Close NEVER triggers a run (handoff §6.2): the next run fails with a
+        # surfaced bm.data() KeyError instead — UX §7.
+        return {"ok": True}
+
+    @app.get("/api/files/{name}/head")
+    async def dataset_head(name: str, lines: Annotated[int, Query(ge=1, le=200)] = 20) -> dict:
+        if name not in ws.datasets:
+            raise HTTPException(status_code=404, detail=f"unknown dataset: {name}")
+        try:
+            text = await asyncio.to_thread(ws.dataset_head, name, lines)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="source missing") from exc
+        return {"name": name, "text": text}
 
     # --- plot.py -------------------------------------------------------------
 
@@ -420,13 +463,19 @@ def create_app(
             # Read-timeout disabled (trap T9): the sidecar heartbeats itself.
             # `async with` closes the upstream on client disconnect (the
             # generator is aclosed by StreamingResponse teardown).
-            async with client.stream(
-                "GET",
-                f"{base}/api/chat/events",
-                timeout=httpx.Timeout(CHAT_PROXY_TIMEOUT_S, read=None),
-            ) as upstream:
-                async for chunk in upstream.aiter_raw():
-                    yield chunk
+            try:
+                async with client.stream(
+                    "GET",
+                    f"{base}/api/chat/events",
+                    timeout=httpx.Timeout(CHAT_PROXY_TIMEOUT_S, read=None),
+                ) as upstream:
+                    async for chunk in upstream.aiter_raw():
+                        yield chunk
+            except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
+                # A client (or the sidecar) dropped mid-chunk — normal across
+                # kill -9 / page reloads (M3.4 QA note). Recovery is the
+                # browser's reconnect; log one quiet line, never a traceback.
+                logger.info("chat SSE stream ended mid-flight: %s", exc)
 
         return StreamingResponse(
             stream(),
@@ -502,7 +551,8 @@ def create_app(
 
 
 def _dataset_summary(name: str, ds: Dataset) -> dict:
-    """JSON view of one dataset — the ``/api/files`` entry shape (handoff §4)."""
+    """JSON view of one dataset — the ``/api/files`` entry shape (handoff §4,
+    M3.5: plus ``settings`` and ``source_exists``)."""
     df = ds.df
     display: dict = df.attrs.get("display_names", {})
     columns = []
@@ -519,7 +569,14 @@ def _dataset_summary(name: str, ds: Dataset) -> dict:
                 "nan_pct": round(100.0 * float(s.isna().mean()), 2),
             }
         )
-    return {"name": name, "source": str(ds.path), "rows": len(df), "columns": columns}
+    return {
+        "name": name,
+        "source": str(ds.path),
+        "rows": len(df),
+        "settings": asdict(ds.settings),  # sentinels tuple: JSON-bound → list
+        "source_exists": ds.path.exists(),
+        "columns": columns,
+    }
 
 
 def _parse_settings(raw: str | None) -> ParserSettings:
@@ -528,14 +585,22 @@ def _parse_settings(raw: str | None) -> ParserSettings:
         return ParserSettings()
     try:
         data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("settings must be a JSON object")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid settings: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="settings must be a JSON object")
+    return _settings_from_object(data)
+
+
+def _settings_from_object(data: dict) -> ParserSettings:
+    """Validate a settings JSON object (import multipart + reparse body — one
+    shape, two transports, M3.5 §6.2). Unknown keys and bad values → 400;
+    explicit ``null`` fields fall back to the defaults ("all optional =
+    defaults", M3.5 §4)."""
     unknown = set(data) - _SETTING_KEYS
     if unknown:
         raise HTTPException(status_code=400, detail=f"unknown settings fields: {sorted(unknown)}")
-    kwargs = dict(data)
+    kwargs = {k: v for k, v in data.items() if v is not None}
     for key in ("sentinels", "float64_columns"):
         if kwargs.get(key) is not None:
             kwargs[key] = tuple(kwargs[key])

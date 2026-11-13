@@ -7,7 +7,10 @@ The workspace directory is the **only** coupling between better-mad and the agen
     ├── datasets.md    # auto-generated manifest of loaded datasets
     ├── plot.py        # the active plotting script (agent- and user-edited)
     └── .data/         # per-dataset parquet snapshots + .json sidecars (source path,
-                        # parser settings), consumed by better_mad.sdk
+                        # parser settings), consumed by better_mad.sdk; browser
+                        # uploads also keep a raw copy under .data/sources/
+                        # (M3.5: their sidecars point there, so re-parse and
+                        # reload-from-disk survive restarts)
 
 The app watches ``plot.py`` and re-runs it (see :mod:`better_mad.core.runner`);
 agent harnesses discover the SDK by reading ``AGENTS.md``. Nothing here touches the UI.
@@ -16,6 +19,8 @@ agent harnesses discover the SDK by reading ``AGENTS.md``. Nothing here touches 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from importlib import resources
@@ -30,6 +35,7 @@ SCRIPT_NAME = "plot.py"
 SKILL_FILE = "AGENTS.md"
 MANIFEST_FILE = "datasets.md"
 DATA_DIR_NAME = ".data"
+SOURCES_DIR_NAME = "sources"  # raw copies of browser uploads (handoff M3.5 §6.1)
 
 STARTER_SCRIPT = '''\
 """Plot script — edited by you and the agent; re-runs automatically on save.
@@ -119,27 +125,129 @@ class Workspace:
     def data_dir(self) -> Path:
         return self.path / DATA_DIR_NAME
 
+    @property
+    def sources_dir(self) -> Path:
+        """``.data/sources`` — raw copies of browser uploads (M3.5 §6.1).
+
+        Created on first use. CLI-loaded files are never copied here, and a
+        registered upload's raw copy is deleted with the dataset (``remove``).
+        """
+        d = self.data_dir / SOURCES_DIR_NAME
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def add_file(self, path: str | Path, settings: ParserSettings | None = None) -> Dataset:
         """Load a file into the workspace: parse, snapshot to parquet + sidecar, refresh manifest.
 
         The dataset name is the file stem; on collision a numeric suffix is added.
-        Raises ``LoaderError`` on unparsable input (nothing is registered).
+        The source path is kept as-is (never copied — a CLI file belongs to the
+        user). Raises ``LoaderError`` on unparsable input (nothing is registered).
         """
         ds = load_dataset(path, settings=settings)
-        name = ds.name
-        n = 2
-        while name in self.datasets:
-            name = f"{ds.name}_{n}"
-            n += 1
+        name = self._dedupe_name(ds.name)
+        self._register(ds, name)
+        return ds
+
+    def add_upload(
+        self, src: Path, original_name: str, settings: ParserSettings | None = None
+    ) -> Dataset:
+        """Register a browser upload: parse, persist a raw copy under ``.data/sources/``,
+        snapshot to parquet + sidecar, refresh manifest (M3.5 §6.1, resolves W9).
+
+        ``src`` is a temporary copy of the upload; ``original_name`` supplies the
+        dataset name (file stem, deduped) and the persisted copy's suffix. On
+        ``LoaderError`` nothing is registered and nothing is copied — the caller
+        deletes ``src``. On success the dataset's source is the persisted copy,
+        so re-parse and reload-from-disk survive restarts.
+        """
+        ds = load_dataset(src, settings=settings)  # LoaderError propagates untouched
+        name = self._dedupe_name(ds.name)
+        suffix = Path(original_name).suffix
+        target = self.sources_dir / f"{name}{suffix}"  # named from the FINAL name (T6)
+        shutil.copyfile(src, target)
+        ds.path = target
+        self._register(ds, name)
+        return ds
+
+    def reparse(self, name: str, settings: ParserSettings) -> Dataset:
+        """Re-load a dataset from its source with new settings, in place (M3.5 §6.1).
+
+        The parquet is overwritten atomically (tmp + ``os.replace`` — a
+        concurrent worker ``bm.data()`` sees old-or-new, never truncated, T3),
+        the sidecar is rewritten, the name is preserved even if columns changed,
+        and the manifest is refreshed. Unknown name → ``KeyError``;
+        ``LoaderError`` propagates with the dataset untouched.
+        """
+        if name not in self.datasets:
+            raise KeyError(name)
+        old = self.datasets[name]
+        ds = load_dataset(old.path, settings=settings)  # LoaderError propagates
         ds.name = name
-        ds.df.to_parquet(self.data_dir / f"{name}.parquet")
+        tmp = self.data_dir / f"{name}.parquet.tmp"
+        ds.df.to_parquet(tmp)
+        os.replace(tmp, self.data_dir / f"{name}.parquet")  # atomic on one filesystem
         (self.data_dir / f"{name}.json").write_text(_dump_sidecar(ds))
         self.datasets[name] = ds
         self.refresh_manifest()
         return ds
 
+    def remove(self, name: str) -> None:
+        """Close a dataset: delete its parquet + sidecar, drop the entry, refresh
+        the manifest (M3.5 §6.1).
+
+        The raw source is deleted **only** when it resolves under ``sources_dir``
+        (a persisted upload copy) — never a user's CLI file (trap T4). Unknown
+        name → ``KeyError``.
+        """
+        if name not in self.datasets:
+            raise KeyError(name)
+        source = self.datasets.pop(name).path
+        (self.data_dir / f"{name}.parquet").unlink(missing_ok=True)
+        (self.data_dir / f"{name}.json").unlink(missing_ok=True)
+        if _is_under(source, self.sources_dir):
+            source.unlink(missing_ok=True)
+        self.refresh_manifest()
+
+    def dataset_head(self, name: str, lines: int = 20) -> str:
+        """First ``lines`` lines of a dataset's raw source (M3.5 §6.1) — the
+        settings-block preview. Text mode with ``errors="replace"``; a missing
+        source raises ``FileNotFoundError`` (the hub maps it to 404-with-detail);
+        unknown name → ``KeyError``.
+        """
+        if name not in self.datasets:
+            raise KeyError(name)
+        path = self.datasets[name].path
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            return "".join(f.readline() for _ in range(lines))
+
+    def _dedupe_name(self, stem: str) -> str:
+        name = stem
+        n = 2
+        while name in self.datasets:
+            name = f"{stem}_{n}"
+            n += 1
+        return name
+
+    def _register(self, ds: Dataset, name: str) -> None:
+        """Shared registration tail of ``add_file``/``add_upload``: parquet snapshot,
+        sidecar, in-memory entry, manifest refresh."""
+        ds.name = name
+        ds.df.to_parquet(self.data_dir / f"{name}.parquet")
+        (self.data_dir / f"{name}.json").write_text(_dump_sidecar(ds))
+        self.datasets[name] = ds
+        self.refresh_manifest()
+
     def refresh_manifest(self) -> None:
         self.manifest_path.write_text(render_manifest(self.datasets))
+
+
+def _is_under(path: Path, directory: Path) -> bool:
+    """True when ``path`` resolves inside ``directory`` (both resolved)."""
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def create_workspace(path: str | Path) -> Workspace:

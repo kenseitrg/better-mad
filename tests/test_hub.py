@@ -24,7 +24,9 @@ import contextlib
 import inspect
 import json
 import os
+import shutil
 import signal
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -383,6 +385,159 @@ async def test_autorun_off_swallows_runs(hub: SimpleNamespace) -> None:
             until=lambda evs: any(e["type"] == "run_result" and e["status"] == "ok" for e in evs),
         )
         assert any(e["type"] == "run_result" for e in events)
+
+
+# --- M3.5: reparse / close / head + settings in summaries -------------------------
+
+
+async def test_files_summaries_carry_settings_and_source_exists(hub: SimpleNamespace) -> None:
+    async with _client(hub) as client:
+        listing = (await client.get("/api/files")).json()
+        entry = listing["datasets"][0]
+        assert set(entry["settings"]) == {
+            "delimiter",
+            "decimal",
+            "sentinels",
+            "comment",
+            "float64_columns",
+        }
+        assert entry["settings"]["sentinels"] == [-999.25, -999.0, -9999.0, -99999.0, 1e30, "NULL"]
+        assert entry["source_exists"] is True
+
+
+async def test_upload_import_summary_settings_and_reparse_flow(hub: SimpleNamespace) -> None:
+    """The M3.5 import→settings→reparse loop over the REST surface: upload →
+    summary carries settings + source_exists → reparse with changed sentinels →
+    NaN% changes, name preserved, sidecar rewritten."""
+    content = (FIXTURES / "sample_ws.txt").read_bytes()
+    async with _client(hub) as client:
+        resp = await client.post(
+            "/api/files/import", files={"file": ("m35_up.txt", content, "text/plain")}
+        )
+        assert resp.status_code == 200
+        summary = resp.json()
+        assert summary["name"] == "m35_up"  # fresh name in the shared fixture ws
+        assert summary["source_exists"] is True
+        copy = hub.ws.sources_dir / "m35_up.txt"
+        assert copy.is_file()  # raw upload persisted (W9)
+
+        # re-parse: strip sentinels on a file that has none — still ok, settings recorded
+        body = {"sentinels": [-9999.0], "decimal": "."}
+        rp = await client.post("/api/files/m35_up/reparse", json=body)
+        assert rp.status_code == 200
+        rp_summary = rp.json()
+        assert rp_summary["name"] == "m35_up"
+        assert rp_summary["settings"]["sentinels"] == [-9999.0]
+        assert rp_summary["source"].endswith("m35_up.txt")  # still the persisted copy
+        sidecar = json.loads((hub.ws.data_dir / "m35_up.json").read_text())
+        assert sidecar["settings"]["sentinels"] == [-9999.0]
+
+        # bad settings body → 400, dataset untouched
+        bad = await client.post("/api/files/m35_up/reparse", json={"nonsense": 1})
+        assert bad.status_code == 400
+        # unknown name → 404
+        missing = await client.post("/api/files/ghost/reparse", json={})
+        assert missing.status_code == 404
+        # loader error → 400 (decimal ',' + comma delimiter is ambiguous)
+        amb = await client.post(
+            "/api/files/m35_up/reparse", json={"delimiter": "comma", "decimal": ","}
+        )
+        assert amb.status_code == 400
+
+
+async def test_reparse_schedules_run_only_when_auto_run(hub: SimpleNamespace) -> None:
+    async with _client(hub) as client, _sse_client(hub) as sse:
+        # auto-run is on (fixture default): re-parse → run_result arrives
+        events = await _read_events(
+            sse,
+            action=lambda: client.post("/api/files/m35_up/reparse", json={}),
+            until=lambda evs: "run_result" in _types(evs),
+        )
+        run = next(e for e in events if e["type"] == "run_result")
+        assert run["epoch"] == hub.manager.epoch
+
+        # auto-run off: no run scheduled (a stale plot waits for an explicit
+        # trigger — but nothing re-runs silently, handoff §6.2)
+        # drain part 1's run AND any coalesced follow-up (T8: a re-parse that
+        # lands mid-run is remembered as pending and runs once afterwards)
+        async def _drain_runs() -> None:
+            while hub.state._run_task is not None and not hub.state._run_task.done():
+                await asyncio.sleep(0.05)
+
+        await _drain_runs()
+
+        await client.post("/api/autorun", json={"on": False})
+        last_before = hub.state.last_run
+        rp = await client.post("/api/files/m35_up/reparse", json={})
+        assert rp.status_code == 200
+        await asyncio.sleep(SETTLE_GUARD_S)
+        assert hub.state.last_run is last_before  # no run_result landed
+        await client.post("/api/autorun", json={"on": True})  # restore fixture state
+
+
+async def test_close_dataset(hub: SimpleNamespace) -> None:
+    async with _client(hub) as client:
+        ok = await client.delete("/api/files/m35_up")
+        assert ok.status_code == 200
+        assert ok.json() == {"ok": True}
+        assert "m35_up" not in hub.ws.datasets
+        assert not (hub.ws.data_dir / "m35_up.parquet").exists()
+        assert not (hub.ws.data_dir / "m35_up.json").exists()
+        assert not (hub.ws.sources_dir / "m35_up.txt").exists()  # raw copy goes too
+        gone = await client.delete("/api/files/m35_up")
+        assert gone.status_code == 404
+
+        # close NEVER triggers a run (handoff §6.2): no scheduling, no result
+        last_before = hub.state.last_run
+        task_before = hub.state._run_task
+        closed = await client.delete("/api/files/sample_ws")
+        assert closed.status_code == 200
+        await asyncio.sleep(SETTLE_GUARD_S)
+        assert hub.state.last_run is last_before
+        assert hub.state._run_task is task_before
+        hub.ws.add_file(FIXTURES / "sample_ws.txt")  # restore shared-fixture state
+
+
+async def test_dataset_head_endpoints(hub: SimpleNamespace) -> None:
+    async with _client(hub) as client:
+        good = await client.get("/api/files/sample_ws/head")
+        assert good.status_code == 200
+        body = good.json()
+        assert body["name"] == "sample_ws"
+        assert body["text"].splitlines()[0].strip().startswith("CMP")
+        assert len(body["text"].splitlines()) == 20  # default lines=20
+
+        few = await client.get("/api/files/sample_ws/head", params={"lines": 2})
+        assert len(few.json()["text"].splitlines()) == 2
+
+        unknown = await client.get("/api/files/ghost/head")
+        assert unknown.status_code == 404
+
+        # a CLI-loaded source that vanished → 404 {detail: "source missing"}
+        vanished = hub.ws.data_dir.parent / "vanished.txt"
+        shutil.copyfile(FIXTURES / "sample_ws.txt", vanished)
+        ds = hub.ws.add_file(vanished)
+        vanished.unlink()
+        assert ds.path == vanished
+        resp = await client.get("/api/files/vanished/head")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "source missing"
+        hub.ws.remove("vanished")  # restore shared-fixture state
+
+
+async def test_failed_import_cleans_temp_dir(hub: SimpleNamespace) -> None:
+    """T5: the upload temp file never leaks in the system temp dir."""
+
+    def import_count() -> int:
+        return len(list(Path(tempfile.gettempdir()).glob("better-mad-import-*")))
+
+    async with _client(hub) as client:
+        before = import_count()
+        bad = await client.post(
+            "/api/files/import", files={"file": ("m35_junk.txt", b"", "text/plain")}
+        )
+        assert bad.status_code == 400
+        assert import_count() == before  # cleaned up on the failure path
 
 
 # --- crash-loop scenario: own manager on its own workspace -------------------

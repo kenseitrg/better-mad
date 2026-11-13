@@ -258,14 +258,33 @@ def test_error_run_keeps_last_good_roots(inproc) -> None:
 # --- scenario 4: script without show() ---------------------------------------
 
 
-def test_run_without_show_errors_and_document_stays_empty(inproc) -> None:
+def test_run_without_show_is_ok_with_no_figure_and_document_stays_empty(inproc) -> None:
+    """M3.5: a clean run with no ``bm.show()`` is ``ok`` + ``has_figure: false``
+    (the SPA overlays a placeholder); previously it was synthesized into an
+    error. The document keeps its last good roots either way."""
     handle, ws = inproc
     script = _write(ws, "import better_mad.sdk as bm\nprint(bm.list_data())\n")
     result = _post_run(handle, {"script": script})
-    assert result["status"] == "error"
-    assert result["stderr_tail"] == "script ran but never called bm.show()"
+    assert result["status"] == "ok"
+    assert result["has_figure"] is False
     assert "sample_ws" in result["stdout_tail"]  # the script did run
     assert json.loads(handle.doc_json()) == {"empty": True}
+
+
+def test_has_figure_flags_by_run_kind(inproc) -> None:
+    """T7: ok+show → true; ok without show → false; error → false (handoff §9)."""
+    handle, ws = inproc
+    good = _post_run(handle, {"script": _write(ws, POINTS_SCRIPT)})
+    assert good["status"] == "ok" and good["has_figure"] is True
+
+    no_show = _post_run(handle, {"script": _write(ws, "import better_mad.sdk as bm\n")})
+    assert no_show["status"] == "ok" and no_show["has_figure"] is False
+
+    bad = _post_run(handle, {"script": _write(ws, "raise ValueError('boom')\n")})
+    assert bad["status"] == "error" and bad["has_figure"] is False
+
+    missing = _post_run(handle, {"script": "/does/not/exist/plot.py"})
+    assert missing["status"] == "error" and missing["has_figure"] is False
 
 
 def test_missing_script_file_is_error_not_crash(inproc) -> None:
