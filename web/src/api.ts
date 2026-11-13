@@ -40,6 +40,10 @@ export interface RunResult {
   stdout_tail: string;
   stderr_tail: string;
   epoch: number;
+  /** M3.5: true iff ok AND ≥1 figure attached. OPTIONAL — old worker payloads
+   *  (pre-M3.5 hub still in memory) lack it; treat missing as `true` so a
+   *  stale client never flashes the no-show placeholder (handoff §4). */
+  has_figure?: boolean;
 }
 
 export interface Status {
@@ -61,6 +65,19 @@ export interface EmbedInfo {
 
 // --- files -------------------------------------------------------------------
 
+/** ParserSettings as JSON — what GET /api/files carries per dataset (M3.5 §4). */
+export interface ParserSettingsJson {
+  delimiter: "auto" | "whitespace" | "comma" | "tab";
+  decimal: string;
+  sentinels: (number | string)[];
+  comment: string;
+  float64_columns: string[] | null;
+}
+
+/** Settings POSTed to import/reparse — same fields, all optional
+ *  (absent → defaults; the hub's _settings_from_object validates). */
+export type SettingsPayload = Partial<ParserSettingsJson>;
+
 export interface ColumnInfo {
   original: string;
   script: string;
@@ -74,6 +91,9 @@ export interface DatasetSummary {
   name: string;
   source: string;
   rows: number;
+  settings: ParserSettingsJson;
+  /** False when a CLI-loaded source was moved/deleted (reload disabled). */
+  source_exists: boolean;
   columns: ColumnInfo[];
 }
 
@@ -150,15 +170,32 @@ export const api = {
   status: () => getJson<Status>("/api/status"),
 
   files: () => getJson<FilesInfo>("/api/files"),
-  /** Import one file with default parse settings (settings UI is M3.5). */
-  importFile: async (file: File): Promise<DatasetSummary> => {
+  /** Import one browser file; `settings` seeds the parser (M3.5). */
+  importFile: async (file: File, settings?: SettingsPayload): Promise<DatasetSummary> => {
     const form = new FormData();
     form.append("file", file);
+    if (settings !== undefined) form.append("settings", JSON.stringify(settings));
     const res = await fetch("/api/files/import", { method: "POST", body: form });
     const body: unknown = await res.json().catch(() => null);
     if (!res.ok) throw new ApiError(res.status, body);
     return body as DatasetSummary;
   },
+  /** Re-parse with new settings (all optional, absent → defaults). 400 on
+   *  LoaderError (dataset unchanged); 404 unknown name. */
+  reparse: (name: string, settings: SettingsPayload) =>
+    postJson<DatasetSummary>(`/api/files/${encodeURIComponent(name)}/reparse`, settings),
+  /** Close a dataset (never triggers a run). 404 unknown name. */
+  closeFile: async (name: string): Promise<{ ok: boolean }> => {
+    const res = await fetch(`/api/files/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const body: unknown = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body as { ok: boolean };
+  },
+  /** Raw first-N-lines preview of the dataset's source. 404 name / missing. */
+  datasetHead: (name: string, lines = 20) =>
+    getJson<{ name: string; text: string }>(
+      `/api/files/${encodeURIComponent(name)}/head?lines=${lines}`,
+    ),
 
   getPlot: () => getJson<{ content: string }>("/api/plot.py"),
   /** Atomic full-file write; unchanged content is a server-side no-op. */

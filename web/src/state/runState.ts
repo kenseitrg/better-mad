@@ -10,6 +10,7 @@
  */
 
 import type { RunResult, Status } from "../api";
+import { shouldBumpForRun } from "./embedPolicy";
 
 export interface RunState {
   phase: "idle" | "running";
@@ -20,7 +21,9 @@ export interface RunState {
   ranAt: number | null;
   /** When the last result of ANY status arrived (staleness badge time). */
   lastAt: number | null;
-  /** Bumped per OK run — the embed token's run component (dead-WS recovery). */
+  /** Bumped per OK run WITH a figure — the embed token's run component.
+   *  A figure-less ok run does NOT bump (embedPolicy §6.5: the doc still holds
+   *  the last good roots; re-embedding would fight the placeholder). */
   okSeq: number;
   autoRun: boolean;
 }
@@ -79,7 +82,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         stale: !ok && state.ranAt !== null,
         ranAt: ok ? now : state.ranAt,
         lastAt: now,
-        okSeq: ok ? state.okSeq + 1 : state.okSeq,
+        okSeq: shouldBumpForRun(action.result) ? state.okSeq + 1 : state.okSeq,
         autoRun: state.autoRun,
       };
     }
@@ -99,6 +102,15 @@ export function statusLine(state: RunState, now: number): string {
     return s < 60 ? `✓ ran ${s}s ago` : `✓ ran ${Math.floor(s / 60)}m ago`;
   }
   return `✗ ${lastReason(last)}`;
+}
+
+/**
+ * True when the last ok run produced no figure — the placeholder case (M3.5
+ * §6.5). Old payloads without `has_figure` default to TRUE-figure (never
+ * flash a placeholder at a stale client). Error/timeout → false.
+ */
+export function isNoShow(result: RunResult | null): boolean {
+  return result !== null && result.status === "ok" && result.has_figure === false;
 }
 
 /** Last non-empty stderr line — the banner/body text (§6.4). */

@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { ChatInfo, HubEvent, WorkerInfo } from "./api";
+import type { ChatInfo, FilesInfo, HubEvent, WorkerInfo } from "./api";
 import { api } from "./api";
 import { Header } from "./header/Header";
 import { ChatPane } from "./chat/ChatPane";
@@ -38,6 +38,12 @@ export function App() {
   const [plotChangedTick, setPlotChangedTick] = useState(0);
   const [outputTick, setOutputTick] = useState(0);
   const [view, setView] = useState<"preview" | "code">("preview");
+  // Dataset list lifted here (M3.5 §6.6): FilesPane consumes it AND the
+  // quick-start card keys off "no datasets" — one fetch loop, no duplication.
+  const [files, setFiles] = useState<FilesInfo | null>(null);
+  const refreshFiles = useCallback(() => {
+    api.files().then(setFiles, () => {}); // pane shows its own error handling
+  }, []);
 
   const onHubEvent = useCallback((event: HubEvent) => {
     switch (event.type) {
@@ -78,6 +84,7 @@ export function App() {
       () => {},
     );
   }, []);
+  useEffect(refreshFiles, [refreshFiles]);
 
   const onRun = useCallback(() => {
     dispatchRun({ type: "manual_run" });
@@ -176,6 +183,7 @@ export function App() {
               <PlotPane
                 worker={worker}
                 runState={runState}
+                hasDatasets={(files?.datasets.length ?? 0) > 0}
                 onOpenOutput={() => {
                   setView("code");
                   setOutputTick((n) => n + 1);
@@ -191,7 +199,7 @@ export function App() {
           </div>
         </div>
         <div className="handle" onPointerDown={startDrag("files")} />
-        <FilesPane />
+        <FilesPane files={files} refresh={refreshFiles} />
       </div>
     </div>
   );

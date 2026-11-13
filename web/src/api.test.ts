@@ -7,10 +7,12 @@
 import { describe, expect, it } from "vitest";
 import type {
   ChatHealth,
+  DatasetSummary,
   EmbedInfo,
   FilesInfo,
   Health,
   HubEvent,
+  RunResult,
   Status,
 } from "./api";
 
@@ -31,6 +33,7 @@ const statusFixture = {
     stdout_tail: "rows: 708650\n",
     stderr_tail: "",
     epoch: 1,
+    has_figure: true, // M3.5: present on new payloads; optional for old ones
   },
   worker: { state: "ready", port: 41873, epoch: 1, restarts: 0 },
   watcher: { last_change_ts: 1794386621.6480699, pending: false },
@@ -43,6 +46,14 @@ const filesFixture = {
       name: "14_01_post_stack_attr_after_scac_all",
       source: "data/14_01_post_stack_attr_after_scac_all",
       rows: 708650,
+      settings: {
+        delimiter: "whitespace",
+        decimal: ".",
+        sentinels: [-999.25, -999.0, -9999.0, -99999.0, 1e30, "NULL"],
+        comment: "#",
+        float64_columns: null,
+      },
+      source_exists: true,
       columns: [
         {
           original: "CMP",
@@ -71,6 +82,21 @@ const filesFixture = {
       ],
     },
   ],
+};
+
+// M3.5 fixtures: reparse returns a dataset summary; head returns raw text.
+const reparseFixture = {
+  name: "m35_up",
+  source: "/tmp/bm35-ws/.data/sources/m35_up.txt",
+  rows: 708650,
+  settings: { delimiter: "auto", decimal: ",", sentinels: [-9999.0], comment: "#", float64_columns: null },
+  source_exists: true,
+  columns: [],
+};
+
+const headFixture = {
+  name: "m35_up",
+  text: "  CMP          XCORD_MIDPT          YCORD_MIDPT\n 876149.000           470098.450          6932935.950\n",
 };
 
 const embedFixture = {
@@ -108,11 +134,37 @@ describe("api payload contracts (live-hub fixtures)", () => {
     const f = filesFixture as FilesInfo;
     const columns = f.datasets[0]?.columns ?? [];
     expect(f.datasets[0]?.rows).toBe(708650);
+    expect(f.datasets[0]?.settings.delimiter).toBe("whitespace"); // M3.5
+    expect(f.datasets[0]?.source_exists).toBe(true); // M3.5
     expect(columns.map((c) => c.script)).toEqual([
       "CMP",
       "X3DT_SEC_ORD_CELCTR",
       "TR_DOMFREQ",
     ]);
+  });
+
+  it("POST /{name}/reparse parses as DatasetSummary (settings round-trip)", () => {
+    const ds = reparseFixture as DatasetSummary;
+    expect(ds.name).toBe("m35_up");
+    expect(ds.settings.decimal).toBe(",");
+    expect(ds.settings.sentinels).toEqual([-9999.0]);
+  });
+
+  it("GET /{name}/head parses as {name, text}", () => {
+    const h = headFixture;
+    expect(h.name).toBe("m35_up");
+    expect(h.text.split("\n")[0]).toContain("CMP");
+  });
+
+  it("RunResult.has_figure is optional (old payload compiles, M3.5 T7)", () => {
+    const old: RunResult = {
+      status: "ok",
+      run_seconds: 1,
+      stdout_tail: "",
+      stderr_tail: "",
+      epoch: 1,
+    };
+    expect(old.has_figure).toBeUndefined();
   });
 
   it("GET /api/plot/embed parses as EmbedInfo", () => {

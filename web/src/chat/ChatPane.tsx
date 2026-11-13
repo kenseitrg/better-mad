@@ -11,7 +11,7 @@
  * wholesale — events during the gap are gone.
  */
 
-import { useCallback, useReducer } from "react";
+import { useCallback, useReducer, useState } from "react";
 import type { ChatInfo } from "../api";
 import { api, ApiError } from "../api";
 import { chatReducer, initialChatState } from "../state/chatState";
@@ -27,17 +27,23 @@ function errorText(err: unknown): string {
 export function ChatPane(props: { chatInfo: ChatInfo | null }) {
   const { chatInfo } = props;
   const [state, dispatch] = useReducer(chatReducer, undefined, initialChatState);
+  // Composer gate (M3.5 QA leftover 1): after a sidecar restart, `New chat`
+  // once showed the stale transcript — the SSE (re)connect raced the
+  // history/health refetch. Both refetches must land before the buttons
+  // re-enable (the T6 pattern applied to the reset path).
+  const [synced, setSynced] = useState(false);
 
   // Resync on EVERY successful open (initial + reconnect): history first
   // (§6.3), then the live stream continues on top; health → busy flag.
   const resync = useCallback(() => {
-    api.chatHistory().then(
-      (h) => dispatch({ type: "history", messages: h.messages }),
-      () => {}, // sidecar down → the banner (from chatInfo) says so
-    );
-    api.chatHealth().then(
-      (h) => dispatch({ type: "busy", value: h.busy }),
-      () => {},
+    setSynced(false); // (re)connect → gate until BOTH refetches land
+    Promise.all([api.chatHistory(), api.chatHealth()]).then(
+      ([h, hp]) => {
+        dispatch({ type: "history", messages: h.messages });
+        dispatch({ type: "busy", value: hp.busy });
+        setSynced(true);
+      },
+      () => {}, // sidecar down → the banner (from chatInfo) says so; the SSE retry refires resync
     );
   }, []);
 
@@ -51,6 +57,8 @@ export function ChatPane(props: { chatInfo: ChatInfo | null }) {
     chatInfo !== null &&
     chatInfo.state !== "ready" &&
     chatInfo.state !== undefined;
+  // Not-yet-synced counts as down for the composer (still shows its own hint).
+  const composerDown = down || !synced;
   const model = chatInfo?.model ?? null;
 
   const send = (text: string) => {
@@ -117,11 +125,11 @@ export function ChatPane(props: { chatInfo: ChatInfo | null }) {
           <textarea
             id="chat-input"
             placeholder={
-              down
+              composerDown
                 ? "chat unavailable"
                 : "Describe the plot you want — e.g. scatter XCORD_MIDPT vs YCORD_MIDPT colored by TR.DOMFREQ"
             }
-            disabled={down}
+            disabled={composerDown}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -138,7 +146,7 @@ export function ChatPane(props: { chatInfo: ChatInfo | null }) {
       <div className="composer" style={{ borderTop: "none", paddingTop: 0 }}>
         <button
           style={{ width: "100%", fontSize: 12 }}
-          disabled={running || down}
+          disabled={running || composerDown}
           title={running ? "refused while a turn is in flight" : undefined}
           onClick={newChat}
         >

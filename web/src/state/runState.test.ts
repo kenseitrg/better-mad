@@ -1,6 +1,7 @@
-/** runState reducer tests (handoff §10): running/stale derivation. */
+/** runState reducer tests (handoff §10): running/stale derivation; M3.5 adds
+ * the okSeq embed-token policy and the noShow derivation. */
 import { describe, expect, it } from "vitest";
-import { initialRunState, lastReason, runReducer, statusLine } from "./runState";
+import { initialRunState, isNoShow, lastReason, runReducer, statusLine } from "./runState";
 import type { RunResult, Status } from "../api";
 
 const ok: RunResult = {
@@ -92,6 +93,46 @@ describe("runState", () => {
   it("autorun action updates the toggle from the server echo", () => {
     let s = runReducer(initialRunState(), { type: "autorun", on: false });
     expect(s.autoRun).toBe(false);
+  });
+
+  it("no-figure ok run does NOT bump okSeq (embed token stays, M3.5 §6.5)", () => {
+    const okFig: RunResult = { ...ok, has_figure: true };
+    const okNoFig: RunResult = { ...ok, has_figure: false };
+    let s = runReducer(initialRunState(), { type: "run_result", result: okFig });
+    expect(s.okSeq).toBe(1);
+    s = runReducer(s, { type: "run_result", result: okNoFig });
+    expect(s.okSeq).toBe(1); // not bumped — no re-embed, placeholder instead
+    s = runReducer(s, { type: "run_result", result: err });
+    expect(s.okSeq).toBe(1);
+    s = runReducer(s, { type: "run_result", result: okFig });
+    expect(s.okSeq).toBe(2); // a later figure run re-embeds normally
+  });
+
+  it("old payload without has_figure bumps okSeq (missing → true)", () => {
+    const s = runReducer(initialRunState(), { type: "run_result", result: ok });
+    expect(s.okSeq).toBe(1);
+  });
+});
+
+describe("isNoShow (M3.5 placeholder derivation)", () => {
+  it("ok without figure → true", () => {
+    expect(isNoShow({ ...ok, has_figure: false })).toBe(true);
+  });
+
+  it("ok with figure → false", () => {
+    expect(isNoShow({ ...ok, has_figure: true })).toBe(false);
+  });
+
+  it("error → false (staleness banner territory, not placeholder)", () => {
+    expect(isNoShow(err)).toBe(false);
+  });
+
+  it("missing has_figure field → false (old payload: never flash placeholder)", () => {
+    expect(isNoShow(ok)).toBe(false);
+  });
+
+  it("no result → false", () => {
+    expect(isNoShow(null)).toBe(false);
   });
 });
 

@@ -20,15 +20,17 @@ import type { WorkerInfo } from "../api";
 import { api } from "../api";
 import { embedPlot, embeddedToken, bokehWsAlive, EmbedError } from "../embed";
 import { needsReembed } from "../state/embedPolicy";
-import { lastReason } from "../state/runState";
+import { isNoShow, lastReason } from "../state/runState";
 import type { RunState } from "../state/runState";
 
 export function PlotPane(props: {
   worker: WorkerInfo | null;
   runState: RunState;
+  /** Any datasets loaded (files lifted to App) — gates the quick-start card. */
+  hasDatasets: boolean;
   onOpenOutput: () => void;
 }) {
-  const { worker, runState, onOpenOutput } = props;
+  const { worker, runState, hasDatasets, onOpenOutput } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const [embedError, setEmbedError] = useState<string | null>(null);
   // Guards against duplicate concurrent embeds (effect can re-fire while a
@@ -37,6 +39,8 @@ export function PlotPane(props: {
   const attempt = useRef<{ token: string; done: boolean } | null>(null);
 
   const hasResult = runState.lastResult !== null;
+  const noShow = isNoShow(runState.lastResult);
+  const quickStart = hasDatasets === false && runState.lastResult?.status !== "ok";
 
   // Slow liveness poll: a silently dead bokeh WS (tab sleep) recovers even
   // without a new run (needsReembed sees bokehWsAlive() === false).
@@ -50,8 +54,13 @@ export function PlotPane(props: {
     const container = containerRef.current;
     if (container === null) return;
     if (worker === null || worker.state !== "ready" || !hasResult) return;
-    // Token = worker epoch + OK-run sequence: changes on every successful run
-    // or restart; constant across reconnect hellos (no gratuitous flicker).
+    // A figure-less ok run holds no new roots (M3.5): never START an embed
+    // for it — the placeholder shows instead. A last-good embed, if any,
+    // stays alive underneath (dimmed); its token was NOT bumped.
+    if (noShow && embeddedToken() === null) return;
+    // Token = worker epoch + OK-run-with-figure sequence: changes on every
+    // successful (figure-bearing) run or restart; constant across reconnect
+    // hellos (no gratuitous flicker) and across no-figure runs (§6.5).
     const want = `${worker.epoch}#${runState.okSeq}`;
     if (attempt.current?.token === want && !attempt.current.done) return; // in flight
     if (!needsReembed(embeddedToken(), want, bokehWsAlive())) return;
@@ -72,7 +81,7 @@ export function PlotPane(props: {
         if (attempt.current?.token === want) attempt.current = null;
         setEmbedError(err instanceof EmbedError ? err.message : String(err));
       });
-  }, [worker, hasResult, runState.okSeq, poll]);
+  }, [worker, hasResult, runState.okSeq, poll, noShow]);
 
   const badge = runState.stale && runState.lastResult !== null;
   const workerBanner =
@@ -93,12 +102,26 @@ export function PlotPane(props: {
         </div>
       )}
       {hasResult ? (
-        <div className="plot-embed" ref={containerRef} />
+        <div className="plot-embed-wrap">
+          <div className="plot-embed" ref={containerRef} />
+          {noShow && (
+            <div className="noshow-overlay">
+              <div className="noshow-card">
+                <div>Script ran but produced no figure.</div>
+                <div className="hint">End the script with bm.show(fig).</div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="plot-empty">
-          {worker !== null && worker.state !== "ready"
-            ? "Waiting for the render worker…"
-            : "Add files (right), then tell the agent what to plot."}
+          {worker !== null && worker.state !== "ready" ? (
+            "Waiting for the render worker…"
+          ) : quickStart ? (
+            <QuickStartCard />
+          ) : (
+            "Add files (right), then tell the agent what to plot."
+          )}
         </div>
       )}
       {badge && runState.lastResult !== null && (
@@ -119,6 +142,30 @@ export function PlotPane(props: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** First-launch moment (UX §2, M3.5 §6.6): shown only while there are no
+ *  datasets and no ok run — the first import + ok run replaces it. */
+export function QuickStartCard() {
+  return (
+    <div className="quick-start">
+      <div className="quick-start-title">Seismic attributes → live plot in three steps</div>
+      <ol>
+        <li>
+          <strong>＋ Add files</strong> in the right panel — big tabular files parse locally
+          with sanitized column names.
+        </li>
+        <li>
+          <strong>Tell the agent what to plot</strong> in the left chat — it writes and runs
+          <code> plot.py</code> for you.
+        </li>
+        <li>
+          <strong>Zoom and pan</strong> — datashaded views re-aggregate live, millions of
+          points stay interactive.
+        </li>
+      </ol>
     </div>
   );
 }

@@ -73,6 +73,32 @@ button {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
 button.primary { border-color: var(--accent); color: var(--accent); }
+button.danger { border-color: var(--error); color: var(--error); }
+button.on { border-color: var(--accent); color: var(--accent); }
+
+/* Theme polish (M3.5): one consistent focus ring everywhere; hover
+   affordances on card actions; subtle dark scrollbars on the three scroll
+   areas. Dark theme only — no switcher (decided). */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+*::-webkit-scrollbar-track { background: transparent; }
 label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--fg-dim); }
 
 /* --- three-pane grid ------------------------------------------------------ */
@@ -184,6 +210,8 @@ label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 1
 .view-toggle button.on { border-color: var(--accent); color: var(--accent); }
 
 .plot-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* wrapper keeps the height chain intact and anchors the no-show overlay */
+.plot-embed-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .plot-embed {
   flex: 1;
   min-height: 0;
@@ -204,6 +232,57 @@ label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 1
   border: 0;
   display: block;
   background: var(--bg);
+}
+/* M3.5 no-show placeholder: the iframe STAYS alive under the dim (the doc
+   holds the last good roots; tearing it down would kill a healthy embed). */
+.noshow-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 10, 0.55);
+  z-index: 5;
+}
+.noshow-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 20px;
+  text-align: center;
+  font-size: 14px;
+}
+.noshow-card .hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+/* Quick-start card (first launch: no datasets, no ok run — M3.5 §6.6). */
+.quick-start {
+  max-width: 460px;
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  font-size: 13px;
+  color: var(--fg);
+}
+.quick-start-title {
+  font-size: 14px;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.quick-start ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.quick-start code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 .plot-empty {
   flex: 1;
@@ -246,13 +325,30 @@ label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 1
   margin-bottom: 8px;
   background: var(--bg-panel);
 }
-.file-card summary {
+.file-card.failed { border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
+.file-card-head {
   padding: 8px 10px;
-  cursor: pointer;
   font-size: 13px;
-  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
-.file-card summary .sub { color: var(--fg-dim); font-size: 11px; display: block; }
+.file-card-head .sub { color: var(--fg-dim); font-size: 11px; }
+.file-card-head .source {
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.file-card-head .actions { display: flex; gap: 4px; }
+.file-card-head .actions button {
+  padding: 1px 7px;
+  font-size: 12px;
+  border-radius: 5px;
+}
 .file-card .columns { padding: 0 10px 8px; }
 .file-card .columns table { border-collapse: collapse; width: 100%; font-size: 11px; }
 .file-card th {
@@ -266,5 +362,88 @@ label.toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 1
   font-family: var(--mono);
   vertical-align: top;
 }
+.file-card tbody tr:hover { background: var(--bg-raised); } /* row hover (theme pass) */
+.file-card td.dim, .file-card td.num { color: var(--fg-dim); }
+.file-card td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* click-to-copy script-name cell (UX §7) */
+button.copy-name {
+  background: none;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  cursor: copy;
+}
+button.copy-name:hover { border-color: var(--border); }
+button.copy-name.copied, button.copy-name.selected { color: var(--ok); border-color: var(--border); }
+
+/* inline close confirm (no modal system — T11) + card-level errors */
+.confirm-strip {
+  margin: 0 10px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.card-error {
+  margin: 0 10px 8px;
+  padding: 4px 10px;
+  color: var(--error);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* per-card import settings block (M3.5 §6.4) */
+.settings-block > summary { display: none; } /* toggled by the ⚙ button, not the summary */
+.settings-body { padding: 0 10px 10px; border-top: 1px dashed var(--border); }
+.settings-form {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  padding-top: 8px;
+  font-size: 12px;
+}
+.settings-form label { display: contents; }
+.settings-form label {
+  color: var(--fg-dim);
+}
+.settings-form select,
+.settings-form input[type="text"] {
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  min-width: 0;
+}
+.settings-body .preview {
+  margin: 8px 0;
+  max-height: 140px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre;
+}
+.settings-body .actions { display: flex; gap: 6px; }
+.settings-body .actions button { padding: 2px 12px; font-size: 12px; }
+
 .files-empty { color: var(--fg-dim); padding: 12px 4px; font-size: 13px; }
+.files-empty strong { color: var(--fg); }
 .files-foot { padding: 8px 12px; border-top: 1px solid var(--border); }

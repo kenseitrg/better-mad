@@ -66,8 +66,13 @@ describe("ChatPane", () => {
     expect(screen.getByText("writing plot.py…")).toBeTruthy();
   });
 
-  it("agent_start disables the composer (one in-flight turn) and shows Stop", () => {
+  it("agent_start disables the composer (one in-flight turn) and shows Stop", async () => {
     render(<ChatPane chatInfo={ready} />);
+    // the sync gate (M3.5 QA leftover 1) must land before the composer enables
+    await act(async () => {
+      FakeEventSource.last?.onopen?.();
+      await Promise.resolve();
+    });
     const input = screen.getByPlaceholderText(/Describe the plot/);
     expect((input as HTMLTextAreaElement).disabled).toBe(false);
     emit({ type: "agent_start" });
@@ -78,8 +83,26 @@ describe("ChatPane", () => {
     expect(screen.getByPlaceholderText(/Describe the plot/)).toBeTruthy();
   });
 
-  it("New chat is disabled while running, enabled when idle", () => {
+  it("composer stays gated until history + health both land (sync gate)", async () => {
     render(<ChatPane chatInfo={ready} />);
+    const newBtn = () => screen.getByText("New chat") as HTMLButtonElement;
+    // (re)connect fires resync — the gate closes until BOTH refetches land
+    act(() => {
+      FakeEventSource.last?.onopen?.();
+    });
+    expect(newBtn().disabled).toBe(true);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0)); // flush the fetch stubs
+    });
+    expect(newBtn().disabled).toBe(false);
+  });
+
+  it("New chat is disabled while running, enabled when idle", async () => {
+    render(<ChatPane chatInfo={ready} />);
+    await act(async () => {
+      FakeEventSource.last?.onopen?.();
+      await Promise.resolve();
+    });
     const newBtn = () => screen.getByText("New chat") as HTMLButtonElement;
     expect(newBtn().disabled).toBe(false);
     emit({ type: "agent_start" });
