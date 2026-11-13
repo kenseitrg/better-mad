@@ -88,6 +88,13 @@ nohup uv run better-mad data/14_01_post_stack_attr_after_scac_all \
 
 ## Notes from the automated pass (things to keep an eye on, not blockers)
 
+- **FIXED 2026-11-12 (found in manual QA)**: preview not auto-updating in a tab
+  left open — the bokeh WebSocket died silently (tab sleep) and nothing re-embedded
+  (worker epoch unchanged; BokehJS's own reconnect repull fails on bokeh 3.x
+  bufferless docs). Each embed now runs in a throwaway srcdoc iframe and the pane
+  re-embeds on every ok run or a dead-WS report. Consequence: each successful run
+  re-renders the plot from scratch (~1–2 s) instead of patching in place — accepted
+  for robustness. If a stale tab ever still freezes: reload the page.
 - **Chat reset race**: `New chat` immediately after a sidecar restart once showed the
   stale transcript until the next reconnect (SSE resync vs `reset` event — trap T6
   pattern). Repro'd once, not again in isolation (0.06 s). If you hit it: reload or
