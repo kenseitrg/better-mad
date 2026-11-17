@@ -65,13 +65,16 @@ export function FilesPane(props: { files: FilesInfo | null; refresh: () => void 
   const [confirmClose, setConfirmClose] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
 
-  const seedForm = (key: string, ds: DatasetSummary) => {
+  const seedForm = (key: string, form: SettingsForm) => {
     setForms((prev) =>
-      prev[key] !== undefined ? prev : { ...prev, [key]: settingsToForm(ds.settings) },
+      prev[key] !== undefined ? prev : { ...prev, [key]: form },
     );
   };
-  const setForm = (key: string, patch: Partial<SettingsForm>) => {
-    setForms((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  // patch merges over the card's EFFECTIVE base (a failed card's form is only
+  // seeded when its settings open — an early onChange must not drop fields,
+  // live-QA finding: parseSentinels(undefined) crashed on Re-parse)
+  const setForm = (key: string, patch: Partial<SettingsForm>, base: SettingsForm) => {
+    setForms((prev) => ({ ...prev, [key]: { ...(prev[key] ?? base), ...patch } }));
   };
 
   /** Load the first-20-rows preview once per card (registered: server; failed: client). */
@@ -91,7 +94,8 @@ export function FilesPane(props: { files: FilesInfo | null; refresh: () => void 
     const open = !settingsOpen[key];
     setSettingsOpen((prev) => ({ ...prev, [key]: open }));
     if (open) {
-      if (ds !== undefined) seedForm(key, ds);
+      // seed the form before the fields can be edited (both card kinds)
+      seedForm(key, ds !== undefined ? settingsToForm(ds.settings) : defaultSettingsForm());
       loadPreview(key, ds, file);
     }
   };
@@ -215,7 +219,7 @@ export function FilesPane(props: { files: FilesInfo | null; refresh: () => void 
             confirmPending={confirmClose === ds.name}
             closing={closing}
             onToggleSettings={() => toggleSettings(ds.name, ds)}
-            onFormChange={(patch) => setForm(ds.name, patch)}
+            onFormChange={(patch) => setForm(ds.name, patch, settingsToForm(ds.settings))}
             onReparse={() => reparse(ds.name, ds)}
             onReload={() => reload(ds)}
             onClose={() => requestClose(ds.name)}
@@ -232,7 +236,7 @@ export function FilesPane(props: { files: FilesInfo | null; refresh: () => void 
             preview={previews[`failed:${entry.id}`]}
             error={cardErrors[`failed:${entry.id}`] || ""}
             onToggleSettings={() => toggleSettings(`failed:${entry.id}`, undefined, entry.file)}
-            onFormChange={(patch) => setForm(`failed:${entry.id}`, patch)}
+            onFormChange={(patch) => setForm(`failed:${entry.id}`, patch, defaultSettingsForm())}
             onReparse={() => retryImport(entry)}
             onDismiss={() => dismissFailed(entry.id)}
           />
@@ -292,7 +296,7 @@ function SettingsFields(props: {
         <input
           type="text"
           value={form.sentinels}
-          placeholder="-999.25, -9999, NULL (comma/space separated; empty = none)"
+          placeholder="sentinels: -999.25, -9999, NULL (comma/space separated; empty = none)"
           onChange={(e) => onChange({ sentinels: e.target.value })}
         />
       </label>
