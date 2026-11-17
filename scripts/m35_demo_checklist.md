@@ -1,5 +1,11 @@
 # M3.5 manual demo checklist
 
+> **Manual QA passed 2026-11-17** — all sections §1–§10 walked through in the
+> browser against the running instance; every M3.5 feature behaved as specified
+> (both exit flows, click-to-copy, close-confirm → KeyError banner, no-`show()`
+> placeholder, 121 MB import busy state, quick-start card, theme pass, and the
+> M3.4 core-loop regression). No findings.
+
 M3.5 = files panel & polish (PLAN M3.5, HANDOFF-M3.5-files-polish.md). Both exit
 flows were already verified live-headlessly during implementation (37/37 checks,
 screenshots in `/tmp/bm35/shots/`, QA script `/tmp/bm35/m35_qa.py`); this
