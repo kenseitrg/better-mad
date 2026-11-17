@@ -14,6 +14,8 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 | 5 | Failure handling | Last good plot stays up with a staleness badge; error tail as a banner. No modals |
 | 6 | Chat turns | One in-flight turn; **Stop** aborts; **New chat** rotates the session (old history stays on disk). Agent actions surface as compact tool notes, never raw protocol noise |
 | 7 | Frontend | **Web-native React/TS SPA** + FastAPI hub; Panel dropped 2026-11-02 (look & feel, framework fights). Plot pane = **live bokeh document** (re-aggregates on zoom) |
+| 8 | Close confirm | **Inline strip in the file card** (M3.5, 2026-11-13), same banner pattern as CodePane's Reload/Overwrite — §9's modal allowance stays unused; no modal system ships |
+| 9 | Failed imports | **Session-scoped error cards** (M3.5, 2026-11-13): the browser keeps the `File`, re-uploads with tweaked settings; F5 drops the cards (accepted) |
 
 ---
 
@@ -55,12 +57,20 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 - **＋ Add files** → browser file picker → files parse immediately with best-guess
   defaults (v1 behavior): delimiter auto-detect, default sentinels, decimal `.`.
-- Each file entry expands to: row/column counts, parse status, and a collapsible
-  **Import settings** block (delimiter, decimal separator, sentinel list, first-20-rows
-  preview, per-column parse status). Editing exposes **Re-parse** — nothing re-loads
-  silently.
-- On success: file appears in the right panel with its columns (display names, min/max,
-  NaN%); `datasets.md` in the workspace is regenerated immediately.
+  The button shows a busy state while the upload/parse is in flight.
+- **Success**: the raw file is persisted under `.data/sources/` (design §4) so
+  re-parse and reload-from-disk survive restarts; the dataset card appears with
+  row/column counts and columns (display names, min/max, NaN%).
+- **Failure**: the file stays as a session-scoped **error card** in the files pane
+  (name, error, the same settings form with a client-side first-rows preview).
+  [Re-parse] re-uploads it with the tweaked settings; [Dismiss] drops the card.
+  A page reload drops failed cards (decided) — registered files are unaffected.
+- Each dataset card expands to a collapsible **Import settings** block (delimiter,
+  decimal separator, sentinel list, comment char, float64 columns, first-20-rows
+  preview). **Re-parse** is the only way settings apply — nothing re-loads silently
+  (and when auto-run is on, a re-parse re-runs the plot, like a `plot.py` edit).
+  **⟳ Reload** re-reads from disk with the current settings (disabled when the
+  source file is gone).
 - Wrong parses must be *visible* (status + counts), never silent.
 
 ## 4. The agent loop (core flow)
@@ -106,15 +116,20 @@ How the user interacts with the agent-driven instrument. Complements `design.md`
 
 ## 7. Right panel — files & columns
 
-- One card per loaded file: name, rows×cols, parse status; expand → columns with
-  **original display names** and quick stats (min/max/NaN%).
-- Column names are **click-to-copy** (copies the sanitized name scripts must use, with
-  a tooltip showing the mapping). Rationale: the consumer of column names in v2 is a
-  text script, so copy beats a picker.
-- File actions: re-parse settings, reload from disk, close (with confirm if the script
-  references it).
+- One card per loaded file: name, rows×cols, dimmed source path; expand → columns with
+  **original display names** and quick stats (min/max/NaN%, null min/max as `—`).
+- **Click-to-copy**: the script-name cell is a button that copies the sanitized name
+  scripts must use (tooltip shows `original → script`; transient `copied ✓`). If the
+  clipboard refuses (focus loss), it degrades to select-the-text — never an error.
+- File actions: ⚙ import settings (+ Re-parse), ⟳ reload from disk, ✕ close.
+- **Close confirm** (M3.5): if `plot.py` references the dataset (`bm.data("name")`
+  exact quoted match), an **inline strip** asks — *"plot.py references this dataset —
+  the next run will fail with a KeyError. [Close anyway] [Cancel]"* — same pattern as
+  the editor's Reload/Overwrite banner; no modal. Unreferenced files close immediately.
+- For uploads, closing also deletes the raw copy under `.data/sources/`; a CLI-loaded
+  file's source is never deleted.
 - Closing a file referenced by `plot.py` doesn't kill anything — the next run fails
-  with a clear `bm.data()` KeyError that the banner surfaces.
+  with a clear `bm.data()` KeyError that the staleness banner surfaces.
 
 ## 8. Chat behavior
 

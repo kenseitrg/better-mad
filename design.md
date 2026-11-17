@@ -24,6 +24,7 @@ the `archive/codebase` branch.
 | 9 | Agent knowledge | Workspace ships an **`AGENTS.md` skill file + auto-generated dataset manifest** so even small local models can produce correct plots by adapting recipes |
 | 10 | Sandbox | **None.** Scripts run with the user's own privileges — same trust model as running the agent in a normal terminal. Documented, not hidden |
 | 11 | Distribution | Unchanged in spirit: CLI starts the **hub** (uvicorn) on localhost — it spawns the render worker + chat sidecar, serves the SPA, and opens the system browser |
+| 12 | Import storage | **Raw copies under `.data/sources/`** (M3.5, 2026-11-13): a successful browser import persists its raw file copy there and the dataset's `source` points at it — re-parse and reload-from-disk survive restarts. CLI-loaded files keep their real path (never copied). **Failed imports are session-scoped**: the SPA keeps the `File` in an error card and re-uploads with tweaked settings; a page reload drops the card |
 
 ---
 
@@ -79,7 +80,11 @@ workspace/
 ├── datasets.md      # auto-generated manifest of loaded data (names, columns, stats)
 ├── plot.py          # the one active plotting script (agent- and user-edited)
 ├── .data/           # per-dataset parquet snapshots + .json sidecars (source path,
-                     # parser settings) so a reopened workspace can rehydrate
+                     # parser settings) so a reopened workspace can rehydrate;
+                     # browser uploads additionally keep a raw copy under
+                     # .data/sources/ (M3.5) — their sidecars point there, so
+                     # re-parse and reload-from-disk survive restarts; the copy
+                     # is deleted with the dataset (CLI sources never deleted)
 └── .chat/           # sidecar-hosted pi session files (JSONL) — chat history survives
                      # app restarts and workspace reopenings
 ```
@@ -149,7 +154,8 @@ Who touches which workspace file, and when:
 | `AGENTS.md` | app at workspace creation (never overwritten) | pi agent session (pi context-file convention); any external harness | static within a version |
 | `datasets.md` | app, on every import/re-parse | agent harness, user | fully regenerated each time |
 | `plot.py` | pi agent (chat, via its built-in file tools); user via the code editor (or any external editor) | runner (executes), code editor | persists in the workspace |
-| `.data/NAME.parquet` (+ `.json` sidecar) | app, on import | SDK `bm.data()` reads the parquet in the subprocess; app reads the sidecar on workspace reopen (rehydration) | one per open dataset |
+| `.data/NAME.parquet` (+ `.json` sidecar) | app, on import and re-parse (re-parse: atomic tmp+rename overwrite; settings fingerprint is part of the cache key) | SDK `bm.data()` reads the parquet in the subprocess; app reads the sidecar on workspace reopen (rehydration) | one per open dataset |
+| `.data/sources/NAME[.ext]` | app, on browser import (raw copy of the upload; named after the final dataset name) | loader on re-parse / head preview | deleted with the dataset; CLI sources never touched |
 | `.chat/*.jsonl` | sidecar (SessionManager) | sidecar (history replay); app never reads them | one per workspace, rotates on New chat |
 | doc snapshot (JSON, hub memory) | worker, after each successful run | hub — restores it after a worker restart | one per workspace |
 
@@ -280,8 +286,10 @@ localhost; the hub owns every spawn):
 - **Hub** (`better_mad/hub/`, Python, FastAPI + uvicorn): owns the workspace (core),
   file import, the `plot.py` watcher, run orchestration, worker + sidecar lifecycle,
   chat proxying (single origin — no CORS), and serves the built SPA. Endpoints:
-  files/import · files list · plot.py get/put · run · status · events (SSE:
-  run results, worker lifecycle, embed epoch) · plot/embed (worker URL + session id).
+  files/import · files list (with per-dataset settings + source_exists, M3.5) ·
+  files re-parse · files close · files head · plot.py get/put · run · status ·
+  events (SSE: run results with `has_figure`, worker lifecycle, embed epoch) ·
+  plot/embed (worker URL + session id).
   The hub spawns the worker with its own origin allowlisted
   (`--allow-websocket-origin 127.0.0.1:<hub-port>`) — the SPA page comes from
   the hub, not the worker, and bokeh checks websocket origins (a non-empty

@@ -24,12 +24,14 @@ pivoted to agent-driven plotting; the complete v1 codebase is preserved on the
 parquet cache) is restored in M0 — restore from there, don't rewrite.
 
 ## Current status
-- Phase: **M3 in progress — M3.4 done** (SPA shell; exit criteria verified live:
-  chat → agent writes plot.py → watcher runs → live plot → zoom re-rasterizes at
-  1920×1080, one window; kill -9 worker → re-embed with last-good; kill -9 sidecar
-  → chat banner, everything else alive; prod build served by the hub verified).
-  Next: **M3.5 files panel & polish** (import settings, click-to-copy, close
-  confirm, theme/empty states; PLAN.md M3.5).
+- Phase: **M3 done — M3.5 done** (files panel & polish; both exit flows verified
+  live in one window: import → wrong-parse → re-parse end-to-end, sentinel fix
+  with visible NaN% change + `datasets.md` regeneration + auto-run re-plot;
+  click-to-copy, inline close confirm → KeyError staleness banner, no-`show()`
+  placeholder, quick-start card, theme pass, 121 MB browser import with busy
+  state; M3.4 core loop re-verified after the theme pass; prod build served by
+  the hub; W9/W10 closed — uploads persist under `.data/sources/`, Panel layer
+  deleted). Next: **M4 — agent skills & end-to-end validation**.
 - When finishing a milestone: verify its exit criteria, then update PLAN.md status.
 
 ## Locked decisions (do not relitigate without new evidence)
@@ -131,6 +133,11 @@ concerns leak into core.
   toggling Preview/Code uses stacked `visibility` layers, not `display:none`
   (which zeroes the live bokeh container → stale canvas on re-show, and
   un-measures CodeMirror).
+- SPA-era gotcha (M3.5, live-QA find): per-card form state seeded lazily — an
+  early `onChange` before the settings block opens must merge over the card's
+  EFFECTIVE base form, not `undefined` (partial form → `parseSentinels(undefined)`
+  crashed on Re-parse). `setForm(key, patch, base)` + seed-on-open; jsdom's
+  `File.text()` is missing → `readBlobText` FileReader fallback.
 
 ## Commands (fill in as milestones land)
 ```bash

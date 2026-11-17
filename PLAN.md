@@ -201,6 +201,19 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
   names, min/max/NaN%), import settings (delimiter/sentinels/re-parse), close-file
   confirm when referenced; empty/first-launch states; dark theme.
   *Exit:* import → wrong-parse → re-parse flow works end-to-end in the UI.
+  ✔ done 2026-11-13 — both exit flows live-verified headlessly in one window
+  (37/37 checks): comma-decimal import → error card → decimal "," → Re-parse →
+  numeric columns; sentinel file → NaN% 33.3 → sentinels removed → NaN% 0.0,
+  min/max change, `datasets.md` regenerated, auto-run re-plot. Plus: 121 MB
+  imported through the browser (busy state, 708,650-row card); click-to-copy;
+  inline close confirm → KeyError staleness banner (unreferenced closes
+  immediately); no-`show()` placeholder (ok run + `has_figure: false`) appears
+  and clears; quick-start card on fresh workspace; uploads persist raw copies
+  under `.data/sources/` (**W9 closed**); failed imports are session-scoped
+  cards; theme pass; M3.4 core loop re-verified after it (agent → plot → zoom
+  re-raster, kill -9 worker/sidecar → banners → recovery); prod build served
+  by the hub. 134 pytest + 100 vitest, ruff/ty/tsc green. **W10 closed** (Panel
+  layer deleted: `better_mad/app`, `test_preview.py`, `panel>=1.5`).
 - **Exit (M3):** import → chat (or hand-edit) → live preview with re-aggregation on
   zoom, all three panels functional at 1920×1080; worker/sidecar crashes degrade to
   banners without touching the rest.
