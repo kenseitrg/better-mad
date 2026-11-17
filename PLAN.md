@@ -222,6 +222,15 @@ The headless core survives untouched. Steps are ordered by risk (worker first):
 - Author the workspace `AGENTS.md`: SDK reference, hard rules, and complete runnable
   recipes for: colored scatter map (equal aspect, datashaded), crossplot, histogram,
   line/CMP gather, percentile-clipped colormaps, hover/selection via streams.
+- **Agent error-feedback loop (candidate, decided 2026-11-17 to evaluate here —
+  evidence + options in `sessions/2026-11-17-agent-error-feedback-gap.md`)**: today
+  run errors reach only the human; the agent declares broken scripts ready. Two
+  complementary mechanisms: (a) skill recipe — standalone pre-flight
+  (`BETTER_MAD_DATA_DIR=.data BETTER_MAD_OUTPUT=/tmp/x.pkl .venv/bin/python plot.py`,
+  works today, catches element-construction + lazy-opts errors) + read-back of a
+  hub-written `.run/last_result.json` after saving; (b) sidecar auto-inject of the
+  error as a synthetic user message after agent-edited runs (capped rounds). Decide
+  after M4's small-model validation shows how much the recipes alone cover.
 - Encode v1 gotchas (rasterize-first-vdim, sizing policies, pandas-3 parsing).
 - Validate **primarily through the embedded chat panel** (AGENTS.md now loads as a
   context file with guaranteed pickup — design §8); keep one external harness in the
